@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kimodo.cpp Real API Integration</title>
+    <style>
+        /* CSS SAMA SEPERTI SEBELUMNYA */
+        body { margin: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #121212; color: #fff; }
+        #canvas-container { width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; z-index: 1; }
+        
+        .panel {
+            position: absolute; background: rgba(30, 30, 30, 0.9); padding: 15px; border-radius: 12px;
+            border: 1px solid #444; box-shadow: 0 8px 16px rgba(0,0,0,0.5); backdrop-filter: blur(5px); z-index: 10;
+        }
+
+        #left-panel { top: 20px; left: 20px; width: 320px; }
+        #right-panel { top: 20px; right: 20px; width: 280px; display: none; } /* Disembunyikan dulu agar fokus ke API */
+        
+        h3 { margin-top: 0; color: #4CAF50; font-size: 1.1rem; margin-bottom: 10px; border-bottom: 1px solid #444; padding-bottom: 8px; }
+        label { display: block; font-size: 0.8rem; color: #aaa; margin-bottom: 5px; margin-top: 10px; }
+        
+        input[type="text"], textarea, input[type="file"] {
+            width: 100%; padding: 8px; background: #2a2a2a; border: 1px solid #555; 
+            color: white; border-radius: 4px; box-sizing: border-box; font-size: 0.85rem;
+        }
+        textarea { resize: vertical; min-height: 50px; }
+        
+        button {
+            width: 100%; margin-top: 10px; padding: 10px; background: #4CAF50; color: white; 
+            border: none; font-weight: bold; border-radius: 4px; cursor: pointer; transition: 0.2s;
+        }
+        button:hover { background: #45a049; }
+        
+        #progress-container { width: 100%; background: #222; border-radius: 4px; margin-top: 10px; border: 1px solid #444; overflow: hidden; display: none; }
+        #progress-bar { width: 0%; height: 8px; background: #4CAF50; transition: width 0.4s ease; }
+        
+        #playback-controls { display: none; margin-top: 15px; background: #1a1a1a; padding: 10px; border-radius: 6px; border: 1px solid #333; }
+        .play-row { display: flex; align-items: center; gap: 10px; }
+        #btn-play { flex: 0 0 70px; background: #2196F3; margin: 0; padding: 6px; }
+        #anim-slider { flex: 1; cursor: pointer; accent-color: #4CAF50; }
+        
+        #status-box { margin-top: 15px; padding: 10px; border-radius: 4px; background: #222; border: 1px solid #444; font-size: 0.8rem; color: #4CAF50; word-wrap: break-word; }
+        .error { color: #ff5252 !important; border-color: #ff5252 !important; }
+    </style>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+</head>
+<body>
+
+    <div id="canvas-container"></div>
+
+    <div class="panel" id="left-panel">
+        <h3>Kimodo.cpp Real API</h3>
+        <input type="file" id="model-upload" accept=".glb,.gltf">
+        
+        <label>Local API Endpoint</label>
+        <input type="text" id="api-url" value="http://localhost:8080/v1/motion">
+
+        <label>Text Prompt</label>
+        <textarea id="prompt" placeholder="A person walking..."></textarea>
+        
+        <button onclick="generateMotionRealAPI()">Generate Motion</button>
+        
+        <div id="progress-container"><div id="progress-bar"></div></div>
+
+        <div id="playback-controls">
+            <div class="play-row">
+                <button id="btn-play" onclick="togglePlay()">⏸ Pause</button>
+                <input type="range" id="anim-slider" min="0" max="100" value="0">
+            </div>
+        </div>
+
+        <div id="status-box">Status: Ready.</div>
+    </div>
+
+    <script>
+        // --- SETUP DASAR THREE.JS ---
+        const container = document.getElementById('canvas-container');
+        const scene = new THREE.Scene();
+        scene.background = new THREE.Color(0x2a2b2e);
+        const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 100);
+        camera.position.set(0, 1.5, 4);
+        
+        const renderer = new THREE.WebGLRenderer({ antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        container.appendChild(renderer.domElement);
+
+        const orbitControls = new THREE.OrbitControls(camera, renderer.domElement);
+        orbitControls.target.set(0, 1, 0); orbitControls.update();
+
+        scene.add(new THREE.GridHelper(20, 20, 0x555555, 0x333333));
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+        dirLight.position.set(3, 10, 10); scene.add(dirLight);
+        scene.add(new THREE.AmbientLight(0x606060));
+
+        let currentModel = null;
+        let mixer = null;
+        let clock = new THREE.Clock();
+        let currentAction = null;
+        let isPlaying = false;
+        const loader = new THREE.GLTFLoader();
+
+        function updateStatus(msg, isError = false) { 
+            const box = document.getElementById('status-box');
+            box.innerText = `Status: ${msg}`; 
+            box.className = isError ? 'error' : '';
+        }
+
+        function loadModel(url) {
+            if(currentModel) scene.remove(currentModel);
+            if(mixer) { mixer.stopAllAction(); mixer = null; }
+            
+            updateStatus("Memuat model...");
+            loader.load(url, (gltf) => {
+                currentModel = gltf.scene;
+                scene.add(currentModel);
+                mixer = new THREE.AnimationMixer(currentModel);
+                scene.add(new THREE.SkeletonHelper(currentModel));
+                updateStatus("Model loaded! Siap dianimasikan.");
+            });
+        }
+        
+        loadModel('https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/RiggedFigure/glTF/RiggedFigure.gltf');
+
+        // --- REAL API FETCH LOGIC ---
+        async function generateMotionRealAPI() {
+            if (!currentModel || !mixer) return;
+            
+            const promptText = document.getElementById('prompt').value;
+            const apiUrl = document.getElementById('api-url').value;
+            
+            if (!promptText) { alert('Isi prompt terlebih dahulu!'); return; }
+            
+            const progContainer = document.getElementById('progress-container');
+            const progBar = document.getElementById('progress-bar');
+            
+            document.getElementById('playback-controls').style.display = 'none';
+            if(currentAction) currentAction.stop();
+            
+            progContainer.style.display = 'block';
+            progBar.style.width = '30%';
+            updateStatus("Menghubungi API kimodo.cpp (Menunggu AI)...");
+
+            try {
+                // 1. Lakukan Request POST ke server lokal
+                const response = await fetch(apiUrl, {
+                    method: 'POST',
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        // Jika ada token / api-key masukkan di sini
+                    },
+                    body: JSON.stringify({ 
+                        prompt: promptText,
+                        // Parameter lain sesuai dokumentasi kimodo.cpp Anda
+                        // e.g., max_frames: 120
+                    })
+                });
+
+                progBar.style.width = '70%';
+
+                if (!response.ok) {
+                    throw new Error(`Server membalas dengan status: ${response.status}`);
+                }
+
+                // 2. Parsing Response (Format JSON)
+                const motionData = await response.json();
+                updateStatus("Response diterima. Memproses keyframes...");
+                
+                progBar.style.width = '90%';
+
+                // 3. Terapkan data animasi ke model
+                applyMotionDataToRig(motionData);
+
+                progBar.style.width = '100%';
+                updateStatus("Selesai! Animasi berhasil diterapkan.");
+                document.getElementById('playback-controls').style.display = 'block';
+                
+                setTimeout(() => { progContainer.style.display = 'none'; }, 1000);
+
+            } catch (error) {
+                console.error("API Error:", error);
+                progBar.style.width = '0%';
+                updateStatus(`Gagal: ${error.message} (Cek apakah server jalan & perhatikan masalah CORS)`, true);
+            }
+        }
+
+        // --- MAPPING DATA API KE THREE.JS (RETARGETING) ---
+        function applyMotionDataToRig(apiData) {
+            // PENTING: Struktur `apiData` akan sangat bergantung pada output kimodo.cpp.
+            // Kode di bawah ini adalah STRUKTUR UMUM jika API mengembalikan array keyframes (quaternion) per tulang.
+            
+            const tracks = [];
+            const fps = 30;
+            
+            /* CONTOH ASUMSI FORMAT JSON DARI API:
+               apiData = {
+                  duration: 2.5,
+                  bones: {
+                     "Spine": [ {time: 0, q: [x,y,z,w]}, {time: 0.1, q: [...]}, ... ],
+                     "RightArm": [ {time: 0, q: [x,y,z,w]}, ... ]
+                  }
+               }
+            */
+            
+            try {
+                // KARENA INI HANYA CONTOH UMUM, SAYA BUATKAN FALLBACK KE DUMMY JIKA DATA API TIDAK COCOK.
+                // Jika Anda tahu format pastinya, tulis logika for-loop Anda di area ini.
+                
+                if (apiData.bones) {
+                    for (const [boneName, keyframes] of Object.entries(apiData.bones)) {
+                        const times = keyframes.map(kf => kf.time);
+                        const values = [];
+                        keyframes.forEach(kf => values.push(...kf.q)); // [x,y,z,w] rata
+                        
+                        // Cari tulang di model yang namanya mirip
+                        const bone = currentModel.getObjectByName(boneName);
+                        if (bone) {
+                            tracks.push(new THREE.QuaternionKeyframeTrack(`${bone.name}.quaternion`, times, values));
+                        }
+                    }
+                    
+                    const clip = new THREE.AnimationClip('API_Generated', apiData.duration || 2, tracks);
+                    currentAction = mixer.clipAction(clip);
+                    currentAction.play();
+                } else {
+                    // Jika format JSON tidak sesuai asumsi, kita print ke log agar Anda bisa inspect
+                    console.log("FORMAT API TIDAK DIKENALI. Cek data berikut:", apiData);
+                    alert("Data API berhasil ditangkap, tapi formatnya tidak sesuai dengan parser. Cek Console Log!");
+                }
+            } catch (e) {
+                console.error("Retargeting Error:", e);
+                updateStatus("Error saat mapping data ke tulang.", true);
+            }
+
+            isPlaying = true;
+            document.getElementById('btn-play').innerText = "⏸ Pause";
+            clock.getDelta();
+        }
+
+        // --- PLAYBACK CONTROLS ---
+        function togglePlay() {
+            if(!currentAction) return;
+            isPlaying = !isPlaying;
+            document.getElementById('btn-play').innerText = isPlaying ? "⏸ Pause" : "▶ Play";
+            if (isPlaying) clock.getDelta();
+        }
+
+        const slider = document.getElementById('anim-slider');
+        slider.addEventListener('input', (e) => {
+            if (!currentAction) return;
+            isPlaying = false;
+            document.getElementById('btn-play').innerText = "▶ Play";
+            const percent = e.target.value / 100;
+            currentAction.time = percent * currentAction.getClip().duration;
+            mixer.update(0);
+        });
+
+        function animate() {
+            requestAnimationFrame(animate);
+            if (mixer && isPlaying && currentAction) {
+                mixer.update(clock.getDelta());
+                const progress = (currentAction.time / currentAction.getClip().duration) * 100;
+                slider.value = progress;
+            }
+            renderer.render(scene, camera);
+        }
+        animate();
+    </script>
+</body>
+</html>
