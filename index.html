@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>T2M & Auto Rigger (GitHub Pages Version)</title>
+    <title>T2M & Auto Rigger (Kaggle Edition)</title>
     <style>
         body { margin: 0; overflow: hidden; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #121212; color: #fff; }
         #canvas-container { width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; z-index: 1; }
@@ -84,8 +84,8 @@
         <label>1. Upload 3D Character (.glb/.gltf)</label>
         <input type="file" id="model-upload" accept=".glb,.gltf">
         
-        <label>2. Public API Endpoint (Ngrok / Colab)</label>
-        <input type="text" id="api-url" placeholder="https://your-ngrok-url.app/v1/motion">
+        <label>2. Localtunnel URL (dari Kaggle)</label>
+        <input type="text" id="api-url" placeholder="https://xxxx.loca.lt">
 
         <label>3. Text Prompt</label>
         <textarea id="prompt" placeholder="A person walking happily..."></textarea>
@@ -126,9 +126,6 @@
     </div>
 
     <script>
-        // ==========================================
-        // 1. SETUP THREE.JS SCENE
-        // ==========================================
         const container = document.getElementById('canvas-container');
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x2a2b2e);
@@ -143,26 +140,17 @@
         const orbitControls = new THREE.OrbitControls(camera, renderer.domElement);
         orbitControls.target.set(0, 1, 0); orbitControls.update();
 
-        // Lingkungan (Grid & Light)
         scene.add(new THREE.GridHelper(20, 20, 0x555555, 0x333333));
         const dirLight = new THREE.DirectionalLight(0xffffff, 1);
         dirLight.position.set(3, 10, 10); scene.add(dirLight);
         scene.add(new THREE.AmbientLight(0x606060));
 
-        // Transform Controls (Move/Rotate/Scale)
         const transformControl = new THREE.TransformControls(camera, renderer.domElement);
         transformControl.addEventListener('dragging-changed', (e) => orbitControls.enabled = !e.value);
         scene.add(transformControl);
 
-        // ==========================================
-        // 2. MODEL LOADER & ANIMATION GLOBALS
-        // ==========================================
-        let currentModel = null;
-        let mixer = null;
-        let clock = new THREE.Clock();
-        let currentAction = null;
-        let isPlaying = false;
-        let skeletonHelper = null;
+        let currentModel = null, mixer = null, clock = new THREE.Clock();
+        let currentAction = null, isPlaying = false, skeletonHelper = null;
         const loader = new THREE.GLTFLoader();
 
         function updateStatus(msg, isError = false) { 
@@ -183,26 +171,20 @@
             loader.load(url, (gltf) => {
                 currentModel = gltf.scene;
                 scene.add(currentModel);
-                
                 mixer = new THREE.AnimationMixer(currentModel);
                 skeletonHelper = new THREE.SkeletonHelper(currentModel);
                 scene.add(skeletonHelper);
-                
                 transformControl.attach(currentModel);
                 updateStatus("Model loaded! Siap dianimasikan.");
-            }, undefined, (err) => {
-                updateStatus("Error memuat model.", true);
-            });
+            }, undefined, () => updateStatus("Error memuat model.", true));
         }
         
-        // Load default model Khronos Group
         loadModel('https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Models/master/2.0/RiggedFigure/glTF/RiggedFigure.gltf');
         
         document.getElementById('model-upload').addEventListener('change', (e) => {
             if (e.target.files[0]) loadModel(URL.createObjectURL(e.target.files[0]));
         });
 
-        // Editor Transform Logic
         function setTransformMode(mode) {
             transformControl.setMode(mode);
             document.querySelectorAll('#right-panel .tool-btn').forEach(b => b.classList.remove('active'));
@@ -216,16 +198,11 @@
             }
         }
 
-        // ==========================================
-        // 3. AUTO-RIGGER (RAYCASTER MARKERS)
-        // ==========================================
         const raycaster = new THREE.Raycaster();
         const mouse = new THREE.Vector2();
         let isRiggingMode = false;
         const rigPoints = ['Chin', 'Left Wrist', 'Right Wrist', 'Left Knee', 'Right Knee', 'Left Ankle', 'Right Ankle'];
-        let rigIndex = 0;
-        let placedMarkers = {};
-        let markerMeshes = [];
+        let rigIndex = 0, placedMarkers = {}, markerMeshes = [];
 
         function toggleRiggingMode() {
             isRiggingMode = !isRiggingMode;
@@ -248,7 +225,7 @@
 
         function updateRigUI() {
             if (rigIndex < rigPoints.length) {
-                document.getElementById('rig-status').innerText = `Klik pada area: ${rigPoints[rigIndex]}`;
+                document.getElementById('rig-status').innerText = `Klik area: ${rigPoints[rigIndex]}`;
             } else {
                 document.getElementById('rig-status').innerText = "Semua titik selesai dipasang!";
                 toggleRiggingMode();
@@ -256,7 +233,6 @@
         }
 
         window.addEventListener('mousedown', (event) => {
-            // Abaikan klik UI
             if (!isRiggingMode || rigIndex >= rigPoints.length || event.target.tagName !== 'CANVAS') return;
             
             mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
@@ -266,7 +242,6 @@
             const intersects = raycaster.intersectObject(currentModel, true);
             if (intersects.length > 0) {
                 const hit = intersects[0].point;
-                
                 const marker = new THREE.Mesh(
                     new THREE.SphereGeometry(0.04, 16, 16),
                     new THREE.MeshBasicMaterial({ color: 0xFF0000, depthTest: false })
@@ -294,16 +269,22 @@
         }
 
         // ==========================================
-        // 4. API FETCH LOGIC (T2M)
+        // API FETCH DARI GOLANG KIMODO
         // ==========================================
         async function generateMotionAPI() {
             if (!currentModel || !mixer) return;
             
             const promptText = document.getElementById('prompt').value;
-            let apiUrl = document.getElementById('api-url').value;
+            let baseUrl = document.getElementById('api-url').value;
             
+            // Bersihkan URL dari slash di akhir jika ada
+            if(baseUrl.endsWith('/')) baseUrl = baseUrl.slice(0, -1);
+            
+            // Pastikan API endpoint kimodo yang dituju benar. (Biasanya /generate atau disesuaikan dengan demo go run)
+            const apiUrl = `${baseUrl}/generate`; // Ubah '/generate' jika routing kimodo berbeda
+
             if (!promptText) { alert('Isi prompt terlebih dahulu!'); return; }
-            if (!apiUrl) { alert('Masukkan URL API Publik Anda (Ngrok/Colab/Cloudflare)!'); return; }
+            if (!baseUrl) { alert('Masukkan URL Localtunnel dari Kaggle!'); return; }
             
             const progContainer = document.getElementById('progress-container');
             const progBar = document.getElementById('progress-bar');
@@ -314,12 +295,16 @@
             
             progContainer.style.display = 'block';
             progBar.style.width = '20%';
-            updateStatus("Menghubungi API...");
+            updateStatus("Menghubungi API Kaggle...");
 
             try {
+                // Header Bypass-Tunnel-Reminder ini WAJIB ada!
                 const response = await fetch(apiUrl, {
                     method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
+                    headers: { 
+                        'Content-Type': 'application/json',
+                        'Bypass-Tunnel-Reminder': 'true' // Mengakali blokir peringatan localtunnel
+                    },
                     body: JSON.stringify({ prompt: promptText })
                 });
 
@@ -330,7 +315,6 @@
                 updateStatus("Menerapkan animasi...");
                 progBar.style.width = '90%';
 
-                // Terapkan animasi
                 applyRetargeting(data);
 
                 progBar.style.width = '100%';
@@ -343,15 +327,13 @@
             } catch (error) {
                 console.error(error);
                 progBar.style.width = '0%';
-                updateStatus(`Gagal: Cek koneksi CORS/Ngrok URL di Console`, true);
+                updateStatus(`Gagal: Cek console! Pastikan URL benar.`, true);
             }
         }
 
-        // Dummy Parser - Ganti dengan parser JSON asli dari output kimodo.cpp Anda
         function applyRetargeting(apiData) {
             console.log("Data API Diterima:", apiData);
-            
-            // CONTOH: Jika API gagal diparsing, jalankan wiggling dummy
+            // Ganti ini dengan parser BVH/JSON asli dari Kimodo nanti
             const tracks = [];
             let boneCount = 0;
             currentModel.traverse((child) => {
@@ -374,9 +356,6 @@
             clock.getDelta(); 
         }
 
-        // ==========================================
-        // 5. PLAYBACK & EXPORT LOGIC
-        // ==========================================
         function togglePlay() {
             if(!currentAction) return;
             isPlaying = !isPlaying;
@@ -409,9 +388,6 @@
             }, { trs: true, animations: [currentAction.getClip()] });
         }
 
-        // ==========================================
-        // 6. RENDER LOOP
-        // ==========================================
         function animate() {
             requestAnimationFrame(animate);
             if (mixer && isPlaying && currentAction) {
