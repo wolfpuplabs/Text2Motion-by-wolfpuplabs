@@ -18,7 +18,7 @@
         button { padding: 10px; background: #4CAF50; border: none; color: #fff; font-weight: bold; border-radius: 4px; cursor: pointer; }
         .btn-sec { background: #333; font-size: 0.8rem; padding: 8px; margin-top: 4px; }
         .btn-danger { background: #f44336; margin-top: 5px; }
-        #status { font-size: 0.8rem; padding: 8px; background: #222; color: #ffeb3b; border-radius: 4px; word-break: break-all; }
+        #status { font-size: 0.85rem; padding: 10px; background: #222; color: #ffeb3b; border-radius: 4px; word-break: break-all; font-weight: bold; }
         .step-list { font-size: 0.8rem; color: #ccc; background: #262626; padding: 8px; border-radius: 4px; }
         .btn-group { display: flex; gap: 5px; }
     </style>
@@ -39,7 +39,7 @@
         </div>
 
         <div class="btn-group">
-            <button class="btn-sec" style="flex:1" onclick="rotateY()">🔄 Putar Model 90°</button>
+            <button class="btn-sec" style="flex:1" id="autoRotateBtn" onclick="toggleAutoRotate()">🔄 Auto Rotate: ON</button>
             <button class="btn-sec" style="flex:1" onclick="resetCamera()">👁️ Reset Kamera</button>
         </div>
         
@@ -55,7 +55,7 @@
         </div>
 
         <button id="rigBtn" onclick="sendToAutoRigger()">🚀 Process Auto-Rigging</button>
-        <div id="status">Status: Silakan Upload File .GLB</div>
+        <div id="status">Status: Upload File .GLB Kamu</div>
     </div>
 
     <div id="canvas-container"></div>
@@ -73,10 +73,11 @@
         renderer.setPixelRatio(window.devicePixelRatio);
         container.appendChild(renderer.domElement);
 
-        // OrbitControls SELALU AKTIF untuk Putar / Zoom Model
         const controls = new THREE.OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
         controls.dampingFactor = 0.05;
+        controls.autoRotate = true;
+        controls.autoRotateSpeed = 1.5;
 
         scene.add(new THREE.AmbientLight(0xffffff, 1.2));
         const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
@@ -85,18 +86,23 @@
 
         let rawFile = null;
         let currentMesh = null;
+        const meshTargets = []; // Menyimpan semua sub-mesh objek
         const markers = [];
         const markerObjects = [];
         const raycaster = new THREE.Raycaster();
         const mouse = new THREE.Vector2();
 
-        let touchStartX = 0, touchStartY = 0;
+        function toggleAutoRotate() {
+            controls.autoRotate = !controls.autoRotate;
+            document.getElementById('autoRotateBtn').innerText = controls.autoRotate ? "🔄 Auto Rotate: ON" : "⏸️ Auto Rotate: OFF";
+        }
 
         function loadMesh(event) {
             rawFile = event.target.files[0];
             if (!rawFile) return;
 
             resetMarkers();
+            meshTargets.length = 0;
 
             const reader = new FileReader();
             reader.readAsArrayBuffer(rawFile);
@@ -104,6 +110,11 @@
                 new THREE.GLTFLoader().parse(e.target.result, '', (gltf) => {
                     if (currentMesh) scene.remove(currentMesh);
                     currentMesh = gltf.scene;
+
+                    // Mengumpulkan seluruh mesh anak (sub-mesh) dari karakter
+                    currentMesh.traverse((child) => {
+                        if (child.isMesh) meshTargets.push(child);
+                    });
 
                     const box = new THREE.Box3().setFromObject(currentMesh);
                     const center = box.getCenter(new THREE.Vector3());
@@ -117,15 +128,12 @@
 
                     controls.target.set(0, size.y / 2, 0);
                     camera.position.set(0, size.y / 2, size.y * 2.2);
+                    controls.autoRotate = true;
                     controls.update();
 
-                    document.getElementById('status').innerText = 'Tap cepat pada kulit karakter untuk menandai: 1. Dagu (Chin)';
+                    document.getElementById('status').innerText = 'Klik/Tap pada Karakter: 1. Dagu (Chin)';
                 });
             };
-        }
-
-        function rotateY() {
-            if (currentMesh) currentMesh.rotation.y += Math.PI / 2;
         }
 
         function resetCamera() {
@@ -138,50 +146,59 @@
             }
         }
 
-        // MEMBEDAKAN ANTARA TAP (TANDAI TITIK) DAN SWIPE (PUTAR MODEL)
-        renderer.domElement.addEventListener('touchstart', (e) => {
-            if (e.touches.length === 1) {
-                touchStartX = e.touches[0].clientX;
-                touchStartY = e.touches[0].clientY;
-            }
-        }, { passive: true });
+        // PERBAIKAN RAYCASTING PENANDA TITIK (DUAL EVENT: CLICK & TOUCH)
+        function handleInteraction(clientX, clientY) {
+            if (!currentMesh || markers.length >= 4 || meshTargets.length === 0) return;
 
-        renderer.domElement.addEventListener('touchend', (e) => {
-            if (!currentMesh || markers.length >= 4) return;
+            const rect = renderer.domElement.getBoundingClientRect();
+            mouse.x = ((clientX - rect.left) / rect.width) * 2 - 1;
+            mouse.y = -((clientY - rect.top) / rect.height) * 2 + 1;
 
-            const touch = e.changedTouches[0];
-            const distMoved = Math.hypot(touch.clientX - touchStartX, touch.clientY - touchStartY);
+            raycaster.setFromCamera(mouse, camera);
+            // Melakukan pengecekan pada seluruh sub-mesh karakter
+            const intersects = raycaster.intersectObjects(meshTargets, true);
 
-            // Jika pergeseran jari kurang dari 5px, itu dianggap TAP TITIK (bukan memutar kamera)
-            if (distMoved < 5) {
-                const rect = renderer.domElement.getBoundingClientRect();
-                mouse.x = ((touch.clientX - rect.left) / rect.width) * 2 - 1;
-                mouse.y = -((touch.clientY - rect.top) / rect.height) * 2 + 1;
+            if (intersects.length > 0) {
+                const hitPoint = intersects[0].point;
 
-                raycaster.setFromCamera(mouse, camera);
-                const intersects = raycaster.intersectObject(currentMesh, true);
+                // Buat Bola Penanda Merah Terang
+                const markerGeo = new THREE.SphereGeometry(0.06, 16, 16);
+                const markerMat = new THREE.MeshBasicMaterial({ 
+                    color: 0xff0000, 
+                    depthTest: false,
+                    transparent: false
+                });
+                const marker = new THREE.Mesh(markerGeo, markerMat);
+                marker.position.copy(hitPoint);
+                marker.renderOrder = 9999;
 
-                if (intersects.length > 0) {
-                    const point = intersects[0].point;
+                scene.add(marker);
+                markerObjects.push(marker);
+                markers.push({ x: hitPoint.x, y: hitPoint.y, z: hitPoint.z });
 
-                    // Buat Marker Bola Merah yang Terlihat Jelas
-                    const markerGeo = new THREE.SphereGeometry(0.04, 16, 16);
-                    const markerMat = new THREE.MeshBasicMaterial({ color: 0xff0000, depthTest: false });
-                    const marker = new THREE.Mesh(markerGeo, markerMat);
-                    marker.position.copy(point);
-                    marker.renderOrder = 9999;
+                // Hentikan rotasi otomatis begitu penandaan dimulai
+                controls.autoRotate = false;
+                document.getElementById('autoRotateBtn').innerText = "⏸️ Auto Rotate: OFF";
 
-                    scene.add(marker);
-                    markerObjects.push(marker);
-                    markers.push({ x: point.x, y: point.y, z: point.z });
-
-                    const names = ["Dagu", "Siku", "Lutut", "Selangkangan"];
-                    if (markers.length < 4) {
-                        document.getElementById('status').innerText = `✅ ${names[markers.length - 1]} Ditandai! Selanjutnya: ${names[markers.length]}`;
-                    } else {
-                        document.getElementById('status').innerText = '🎉 Semua 4 titik ditandai! Klik Process Auto-Rigging.';
-                    }
+                const names = ["Dagu", "Siku", "Lutut", "Selangkangan"];
+                if (markers.length < 4) {
+                    document.getElementById('status').innerText = `🔴 ${names[markers.length - 1]} Ditandai! Selanjutnya: ${names[markers.length]}`;
+                } else {
+                    document.getElementById('status').innerText = '🎉 Semua 4 titik ditandai! Klik Process Auto-Rigging.';
                 }
+            }
+        }
+
+        // Event Listener khusus Mouse/Desktop
+        renderer.domElement.addEventListener('click', (e) => {
+            handleInteraction(e.clientX, e.clientY);
+        });
+
+        // Event Listener khusus Layar Sentuh iPad
+        renderer.domElement.addEventListener('touchend', (e) => {
+            if (e.changedTouches.length > 0) {
+                const touch = e.changedTouches[0];
+                handleInteraction(touch.clientX, touch.clientY);
             }
         });
 
@@ -189,7 +206,7 @@
             markerObjects.forEach(m => scene.remove(m));
             markerObjects.length = 0;
             markers.length = 0;
-            document.getElementById('status').innerText = 'Titik di-reset. Tap ulang dari Dagu.';
+            document.getElementById('status').innerText = 'Titik di-reset. Mulai tandai ulang dari Dagu.';
         }
 
         async function sendToAutoRigger() {
@@ -219,7 +236,7 @@
                 const blob = await response.blob();
                 const blobUrl = URL.createObjectURL(blob);
 
-                statusDiv.innerText = '✅ Auto-Rig Selesai! Memuat hasil GLB baru...';
+                statusDiv.innerText = '✅ Auto-Rig Selesai! Memuat hasil GLB...';
 
                 resetMarkers();
                 new THREE.GLTFLoader().load(blobUrl, (gltf) => {
@@ -239,6 +256,14 @@
             renderer.render(scene, camera);
         }
         animate();
+
+        window.addEventListener('resize', () => {
+            const w = container.clientWidth;
+            const h = container.clientHeight;
+            camera.aspect = w / h;
+            camera.updateProjectionMatrix();
+            renderer.setSize(w, h);
+        });
     </script>
 </body>
 </html>
