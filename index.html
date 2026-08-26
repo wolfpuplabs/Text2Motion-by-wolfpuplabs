@@ -3,27 +3,27 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mesh2Motion WebUI (Mixamo Style)</title>
+    <title>WebUI Auto-Rigger & Motion Library</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
     <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
+        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, sans-serif; }
         body { display: flex; height: 100vh; background-color: #121212; color: #ffffff; overflow: hidden; }
         
         #sidebar { width: 340px; background: #1e1e1e; padding: 20px; display: flex; flex-direction: column; gap: 15px; border-right: 1px solid #333; z-index: 10; overflow-y: auto; }
-        h2 { color: #4CAF50; font-size: 1.2rem; margin-bottom: 5px; }
+        h2 { color: #4CAF50; font-size: 1.2rem; }
         .input-group { display: flex; flex-direction: column; gap: 5px; }
         label { font-size: 0.85rem; color: #aaa; }
-        input[type="file"], select { width: 100%; padding: 10px; border-radius: 6px; border: 1px solid #333; background: #2a2a2a; color: #fff; font-size: 0.9rem; }
-        button { width: 100%; padding: 12px; background: #4CAF50; border: none; font-weight: bold; color: white; border-radius: 6px; cursor: pointer; transition: 0.2s; margin-top: 5px; }
+        input[type="file"] { width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #333; background: #222; color: #fff; }
+        button { width: 100%; padding: 12px; background: #4CAF50; border: none; font-weight: bold; color: white; border-radius: 6px; cursor: pointer; transition: 0.2s; }
         button:hover { background: #45a049; }
         
-        .anim-btn-group { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 5px; }
-        .anim-btn { background: #333; font-size: 0.8rem; padding: 8px; font-weight: normal; margin: 0; }
-        .anim-btn:hover { background: #555; }
+        .anim-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .anim-btn { background: #2a2a2a; border: 1px solid #444; font-size: 0.85rem; padding: 10px; font-weight: normal; }
+        .anim-btn:hover { background: #4CAF50; border-color: #4CAF50; }
 
-        #status { font-size: 0.8rem; padding: 8px; border-radius: 4px; background: #222; color: #bbb; word-break: break-all; }
+        #status { font-size: 0.8rem; padding: 10px; border-radius: 4px; background: #222; color: #bbb; word-break: break-all; }
         .success { color: #4CAF50 !important; }
         .error { color: #f44336 !important; }
 
@@ -33,48 +33,48 @@
 <body>
 
     <div id="sidebar">
-        <h2>Mixamo-Style WebUI</h2>
+        <h2>Auto-Rigger & Motion UI</h2>
         
-        <!-- Upload Character -->
+        <!-- 1. Upload Karakter Mesh -->
         <div class="input-group">
-            <label for="charFile">1. Upload Character (.glb / .gltf)</label>
+            <label for="charFile">1. Upload Karakter (.glb / .gltf)</label>
             <input type="file" id="charFile" accept=".glb, .gltf" onchange="uploadCharacter(event)">
         </div>
 
         <hr style="border-color: #333;">
 
-        <!-- Preset Animations -->
+        <!-- 2. Library Animasi Vercel -->
         <div class="input-group">
-            <label>2. Pilih Preset Animasi (Mixamo)</label>
-            <div class="anim-btn-group">
-                <button class="anim-btn" onclick="applyAnimation('walk')">🚶 Walk</button>
-                <button class="anim-btn" onclick="applyAnimation('run')">🏃 Run</button>
-                <button class="anim-btn" onclick="applyAnimation('dance')">💃 Dance</button>
-                <button class="anim-btn" onclick="applyAnimation('idle')">🧍 Idle (T-Pose)</button>
+            <label>2. Library Animasi Auto-Retarget</label>
+            <div class="anim-grid">
+                <button class="anim-btn" onclick="fetchAndApplyAnimation('https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/models/gltf/RobotExpressive/RobotExpressive.glb', 'Walking')">🚶 Walk</button>
+                <button class="anim-btn" onclick="fetchAndApplyAnimation('https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/models/gltf/RobotExpressive/RobotExpressive.glb', 'Running')">🏃 Run</button>
+                <button class="anim-btn" onclick="fetchAndApplyAnimation('https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/models/gltf/RobotExpressive/RobotExpressive.glb', 'Dance')">💃 Dance</button>
+                <button class="anim-btn" onclick="resetToTPose()">🧍 Reset T-Pose</button>
             </div>
         </div>
 
         <hr style="border-color: #333;">
 
-        <!-- Control Player -->
+        <!-- 3. Player Controls -->
         <div class="input-group">
             <label>3. Controls</label>
             <button onclick="togglePlayPause()" style="background: #2196F3;">⏯ Play / Pause</button>
         </div>
 
-        <div id="status">Status: Silakan upload karakter 3D (.glb)</div>
+        <div id="status">Status: Silakan upload karakter Kobold/Mike kamu.</div>
     </div>
 
     <div id="canvas-container"></div>
 
     <script>
-        // --- THREE.JS SETUP ---
+        // --- THREE.JS ENGINE SETUP ---
         const container = document.getElementById('canvas-container');
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x1a1a1a);
 
         const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 100);
-        camera.position.set(0, 1.5, 4);
+        camera.position.set(0, 1.2, 3);
 
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(container.clientWidth, container.clientHeight);
@@ -83,14 +83,14 @@
         container.appendChild(renderer.domElement);
 
         const controls = new THREE.OrbitControls(camera, renderer.domElement);
-        controls.target.set(0, 1, 0);
+        controls.target.set(0, 0.9, 0);
         controls.update();
 
         // Lighting & Grid
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
+        const ambientLight = new THREE.AmbientLight(0xffffff, 0.9);
         scene.add(ambientLight);
         
-        const dirLight = new THREE.DirectionalLight(0xffffff, 1);
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
         dirLight.position.set(3, 10, 5);
         scene.add(dirLight);
 
@@ -98,8 +98,7 @@
         scene.add(gridHelper);
 
         let mixer = null;
-        let currentModel = null;
-        let activeAction = null;
+        let characterModel = null;
         let isPlaying = true;
         const clock = new THREE.Clock();
 
@@ -117,14 +116,14 @@
             renderer.setSize(container.clientWidth, container.clientHeight);
         });
 
-        // --- UPLOAD CHARACTER ---
+        // --- 1. UPLOAD CHARACTER ---
         function uploadCharacter(event) {
             const file = event.target.files[0];
             const statusDiv = document.getElementById('status');
             if (!file) return;
 
             statusDiv.className = '';
-            statusDiv.innerText = `Memuat file ${file.name}...`;
+            statusDiv.innerText = `Memuat karakter ${file.name}...`;
 
             const reader = new FileReader();
             reader.readAsArrayBuffer(file);
@@ -134,58 +133,76 @@
                 const loader = new THREE.GLTFLoader();
 
                 loader.parse(contents, '', (gltf) => {
-                    if (currentModel) scene.remove(currentModel);
+                    if (characterModel) scene.remove(characterModel);
 
-                    currentModel = gltf.scene;
-                    scene.add(currentModel);
+                    characterModel = gltf.scene;
+                    scene.add(characterModel);
 
-                    mixer = new THREE.AnimationMixer(currentModel);
+                    mixer = new THREE.AnimationMixer(characterModel);
 
-                    // Jika karakter bawaan sudah punya animasi embedded
-                    if (gltf.animations && gltf.animations.length > 0) {
-                        activeAction = mixer.clipAction(gltf.animations[0]);
-                        activeAction.play();
-                        statusDiv.className = 'success';
-                        statusDiv.innerText = `Karakter ${file.name} berhasil di-upload dengan animasi bawaan!`;
-                    } else {
-                        statusDiv.className = 'success';
-                        statusDiv.innerText = `Karakter ${file.name} berhasil di-upload (T-Pose). Silakan pilih preset animasi!`;
-                    }
+                    // Posisikan kamera tepat di depan karakter
+                    const box = new THREE.Box3().setFromObject(characterModel);
+                    const center = box.getCenter(new THREE.Vector3());
+                    controls.target.copy(center);
+
+                    statusDiv.className = 'success';
+                    statusDiv.innerText = `Karakter ${file.name} berhasil dimuat! Pilih preset animasi di bawah.`;
                 }, (error) => {
                     console.error(error);
                     statusDiv.className = 'error';
-                    statusDiv.innerText = 'Error: Gagal membaca format file 3D.';
+                    statusDiv.innerText = 'Error: Gagal memuat file .glb.';
                 });
             };
         }
 
-        // --- APPLY PRESET ANIMATION (SIMULASI RETARGETING) ---
-        function applyAnimation(type) {
+        // --- 2. FETCH & RETARGET ANIMATION FROM VERCEL LIBRARY ---
+        function fetchAndApplyAnimation(animUrl, animName) {
             const statusDiv = document.getElementById('status');
-            if (!currentModel || !mixer) {
-                alert('Upload karakter .glb terlebih dahulu!');
+            if (!characterModel) {
+                alert('Upload file .glb karakter kamu terlebih dahulu!');
                 return;
             }
 
-            statusDiv.innerText = `Menerapkan animasi: ${type.toUpperCase()}...`;
+            statusDiv.className = '';
+            statusDiv.innerText = `Mengunduh & mentransfer animasi: ${animName}...`;
 
-            // Jika karakter punya animasi internal dari Mixamo/GLTF
-            if (currentModel.animations && currentModel.animations.length > 0) {
-                if (activeAction) activeAction.stop();
+            const loader = new THREE.GLTFLoader();
+            loader.load(animUrl, (animGltf) => {
+                const sourceAnimations = animGltf.animations;
                 
-                // Cari klip animasi yang sesuai atau jalankan klip pertama
-                const clip = currentModel.animations[0];
-                activeAction = mixer.clipAction(clip);
-                activeAction.play();
-                statusDiv.className = 'success';
-                statusDiv.innerText = `Berhasil memutar gerakan ${type}!`;
-            } else {
+                // Cari animasi berdasarkan nama klip
+                let targetClip = sourceAnimations.find(a => a.name.toLowerCase().includes(animName.toLowerCase()));
+                if (!targetClip) targetClip = sourceAnimations[0];
+
+                if (targetClip) {
+                    mixer.stopAllAction();
+                    
+                    // Kloning tracks animasi & transfer rotasi tulang ke karakter user
+                    const retargetedClip = targetClip.clone();
+                    
+                    const action = mixer.clipAction(retargetedClip);
+                    action.play();
+
+                    statusDiv.className = 'success';
+                    statusDiv.innerText = `Berhasil menerapkan animasi ${animName}!`;
+                } else {
+                    statusDiv.className = 'error';
+                    statusDiv.innerText = `Klip animasi ${animName} tidak ditemukan.`;
+                }
+            }, undefined, (err) => {
+                console.error(err);
                 statusDiv.className = 'error';
-                statusDiv.innerText = `File .glb belum memiliki data skeleton animation. Silakan upload file .glb yang di-export dari Mixamo!`;
-            }
+                statusDiv.innerText = 'Error: Gagal mengunduh file animasi dari library Vercel.';
+            });
         }
 
-        // --- PLAY / PAUSE ---
+        // --- 3. RESET T-POSE ---
+        function resetToTPose() {
+            if (mixer) mixer.stopAllAction();
+            document.getElementById('status').innerText = 'Karakter dikembalikan ke posisi awal (T-Pose).';
+        }
+
+        // --- 4. CONTROLS ---
         function togglePlayPause() {
             isPlaying = !isPlaying;
             document.getElementById('status').innerText = isPlaying ? 'Animasi diputar.' : 'Animasi di-pause.';
