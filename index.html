@@ -2,71 +2,41 @@
 <html lang="id">
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebUI Auto-Retargeter Studio</title>
+    <title>Mixamo-Style Auto-Rigger UI</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/three-bvh-retargeter@0.1.2/build/three-bvh-retargeter.min.js"></script>
     <style>
-        * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, sans-serif; }
-        body { display: flex; height: 100vh; background-color: #121212; color: #ffffff; overflow: hidden; }
-        
-        #sidebar { width: 340px; background: #1e1e1e; padding: 20px; display: flex; flex-direction: column; gap: 15px; border-right: 1px solid #333; z-index: 10; overflow-y: auto; }
-        h2 { color: #4CAF50; font-size: 1.2rem; }
-        .input-group { display: flex; flex-direction: column; gap: 5px; }
-        label { font-size: 0.85rem; color: #aaa; }
-        input[type="file"] { width: 100%; padding: 8px; border-radius: 6px; border: 1px solid #333; background: #222; color: #fff; }
-        button { width: 100%; padding: 12px; background: #4CAF50; border: none; font-weight: bold; color: white; border-radius: 6px; cursor: pointer; transition: 0.2s; }
-        button:hover { background: #45a049; }
-        
-        .anim-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-        .anim-btn { background: #2a2a2a; border: 1px solid #444; font-size: 0.85rem; padding: 10px; font-weight: normal; }
-        .anim-btn:hover { background: #4CAF50; border-color: #4CAF50; }
-
-        #status { font-size: 0.8rem; padding: 10px; border-radius: 4px; background: #222; color: #bbb; word-break: break-all; }
-        .success { color: #4CAF50 !important; }
-        .error { color: #f44336 !important; }
-
-        #canvas-container { flex: 1; position: relative; width: 100%; height: 100%; }
+        body { margin: 0; display: flex; height: 100vh; background: #121212; color: #fff; font-family: sans-serif; }
+        #sidebar { width: 300px; padding: 20px; background: #1e1e1e; display: flex; flex-direction: column; gap: 10px; }
+        #canvas-container { flex: 1; }
+        button { padding: 10px; background: #4CAF50; border: none; color: #fff; font-weight: bold; cursor: pointer; border-radius: 4px; }
+        .step { font-size: 0.85rem; color: #aaa; }
     </style>
 </head>
 <body>
 
     <div id="sidebar">
-        <h2>Auto-Retargeter Studio</h2>
+        <h2>Auto-Rigger Web UI</h2>
+        <input type="file" id="meshFile" accept=".glb, .gltf, .obj" onchange="loadMesh(event)">
         
-        <div class="input-group">
-            <label for="charFile">1. Upload Karakter (.glb / .gltf)</label>
-            <input type="file" id="charFile" accept=".glb, .gltf" onchange="uploadCharacter(event)">
+        <div class="step">
+            <p><strong>Langkah Penandaan Titik:</strong></p>
+            <ol>
+                <li>Klik <b>Dagu (Chin)</b></li>
+                <li>Klik <b>Siku (Elbow)</b></li>
+                <li>Klik <b>Lutut (Knee)</b></li>
+                <li>Klik <b>Selangkangan (Groin)</b></li>
+            </ol>
         </div>
 
-        <hr style="border-color: #333;">
-
-        <div class="input-group">
-            <label>2. Library Animasi (Auto-Mapped)</label>
-            <div class="anim-grid">
-                <button class="anim-btn" onclick="applyRetargetedAnimation('https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/models/gltf/RobotExpressive/RobotExpressive.glb', 'Walking')">🚶 Walk</button>
-                <button class="anim-btn" onclick="applyRetargetedAnimation('https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/models/gltf/RobotExpressive/RobotExpressive.glb', 'Running')">🏃 Run</button>
-                <button class="anim-btn" onclick="applyRetargetedAnimation('https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/models/gltf/RobotExpressive/RobotExpressive.glb', 'Dance')">💃 Dance</button>
-                <button class="anim-btn" onclick="resetToTPose()">🧍 Reset T-Pose</button>
-            </div>
-        </div>
-
-        <hr style="border-color: #333;">
-
-        <div class="input-group">
-            <label>3. Controls</label>
-            <button onclick="togglePlayPause()" style="background: #2196F3;">⏯ Play / Pause</button>
-        </div>
-
-        <div id="status">Status: Silakan upload karakter Kobold/Mike kamu.</div>
+        <button onclick="sendToAutoRigger()">🚀 Process Auto-Rigging</button>
+        <div id="status">Status: Upload mesh tanpa tulang...</div>
     </div>
 
     <div id="canvas-container"></div>
 
     <script>
-        // --- THREE.JS ENGINE SETUP ---
         const container = document.getElementById('canvas-container');
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x1a1a1a);
@@ -76,167 +46,76 @@
 
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(container.clientWidth, container.clientHeight);
-        renderer.setPixelRatio(window.devicePixelRatio);
-        renderer.shadowMap.enabled = true;
         container.appendChild(renderer.domElement);
 
         const controls = new THREE.OrbitControls(camera, renderer.domElement);
-        controls.target.set(0, 0.9, 0);
-        controls.update();
-
-        // Lighting & Grid
-        const ambientLight = new THREE.AmbientLight(0xffffff, 0.9);
-        scene.add(ambientLight);
         
-        const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+        scene.add(new THREE.AmbientLight(0xffffff, 0.8));
+        const dirLight = new THREE.DirectionalLight(0xffffff, 1);
         dirLight.position.set(3, 10, 5);
         scene.add(dirLight);
 
-        const gridHelper = new THREE.GridHelper(10, 10, 0x444444, 0x222222);
-        scene.add(gridHelper);
+        let currentMesh = null;
+        const markers = [];
+        const raycaster = new THREE.Raycaster();
+        const mouse = new THREE.Vector2();
 
-        let targetMixer = null;
-        let sourceMixer = null;
-        let targetModel = null;
-        let sourceModel = null;
-        let retargeter = null;
-        let isPlaying = true;
-        const clock = new THREE.Clock();
-
-        function animate() {
-            requestAnimationFrame(animate);
-            const delta = clock.getDelta();
-            if (isPlaying) {
-                if (sourceMixer) sourceMixer.update(delta);
-                if (targetMixer) targetMixer.update(delta);
-                if (retargeter) retargeter.update();
-            }
-            renderer.render(scene, camera);
-        }
-        animate();
-
-        window.addEventListener('resize', () => {
-            camera.aspect = container.clientWidth / container.clientHeight;
-            camera.updateProjectionMatrix();
-            renderer.setSize(container.clientWidth, container.clientHeight);
-        });
-
-        // --- 1. UPLOAD TARGET CHARACTER ---
-        function uploadCharacter(event) {
+        function loadMesh(event) {
             const file = event.target.files[0];
-            const statusDiv = document.getElementById('status');
-            if (!file) return;
-
-            statusDiv.className = '';
-            statusDiv.innerText = `Memuat karakter ${file.name}...`;
-
             const reader = new FileReader();
             reader.readAsArrayBuffer(file);
-
-            reader.onload = function (e) {
-                const contents = e.target.result;
-                const loader = new THREE.GLTFLoader();
-
-                loader.parse(contents, '', (gltf) => {
-                    if (targetModel) scene.remove(targetModel);
-
-                    targetModel = gltf.scene;
-                    scene.add(targetModel);
-
-                    targetMixer = new THREE.AnimationMixer(targetModel);
-
-                    const box = new THREE.Box3().setFromObject(targetModel);
-                    const center = box.getCenter(new THREE.Vector3());
-                    controls.target.copy(center);
-
-                    statusDiv.className = 'success';
-                    statusDiv.innerText = `Karakter ${file.name} berhasil di-upload! Pilih animasi di bawah.`;
-                }, (error) => {
-                    console.error(error);
-                    statusDiv.className = 'error';
-                    statusDiv.innerText = 'Error: Gagal memuat file .glb.';
+            reader.onload = (e) => {
+                new THREE.GLTFLoader().parse(e.target.result, '', (gltf) => {
+                    if (currentMesh) scene.remove(currentMesh);
+                    currentMesh = gltf.scene;
+                    scene.add(currentMesh);
+                    document.getElementById('status').innerText = 'Klik pada model untuk menandai posisi sendi!';
                 });
             };
         }
 
-        // --- 2. AUTO-RETARGET ANIMATION FROM LIBRARY ---
-        function applyRetargetedAnimation(sourceUrl, animName) {
-            const statusDiv = document.getElementById('status');
-            if (!targetModel) {
-                alert('Upload karakter .glb kamu terlebih dahulu!');
+        // Fitur Klik Penanda Titik (Raycasting)
+        window.addEventListener('pointerdown', (e) => {
+            if (!currentMesh) return;
+            
+            mouse.x = (e.clientX - container.offsetLeft) / container.clientWidth * 2 - 1;
+            mouse.y = -(e.clientY / container.clientHeight) * 2 + 1;
+
+            raycaster.setFromCamera(mouse, camera);
+            const intersects = raycaster.intersectObject(currentMesh, true);
+
+            if (intersects.length > 0) {
+                const point = intersects[0].point;
+                
+                // Buat Marker Bola Merah di titik klik
+                const markerGeo = new THREE.SphereGeometry(0.03, 16, 16);
+                const markerMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
+                const marker = new THREE.Mesh(markerGeo, markerMat);
+                marker.position.copy(point);
+                scene.add(marker);
+
+                markers.push({ x: point.x, y: point.y, z: point.z });
+                document.getElementById('status').innerText = `Titik ${markers.length} ditandai!`;
+            }
+        });
+
+        async function sendToAutoRigger() {
+            if (markers.length < 4) {
+                alert('Tandai minimal 4 titik sendi terlebih dahulu!');
                 return;
             }
 
-            statusDiv.className = '';
-            statusDiv.innerText = `Mengunduh & melakukan auto-rig retargeting: ${animName}...`;
-
-            const loader = new THREE.GLTFLoader();
-            loader.load(sourceUrl, (gltf) => {
-                sourceModel = gltf.scene;
-                sourceModel.visible = false; // Sembunyikan mesh model asal
-                scene.add(sourceModel);
-
-                sourceMixer = new THREE.AnimationMixer(sourceModel);
-                
-                let clip = gltf.animations.find(a => a.name.toLowerCase().includes(animName.toLowerCase()));
-                if (!clip) clip = gltf.animations[0];
-
-                if (clip) {
-                    const action = sourceMixer.clipAction(clip);
-                    action.play();
-
-                    // --- RETARGETING ENGINE (MEMETAKAN TULANG) ---
-                    try {
-                        let targetSkeleton, sourceSkeleton;
-                        
-                        targetModel.traverse(child => { if (child.isSkinnedMesh) targetSkeleton = child.skeleton; });
-                        sourceModel.traverse(child => { if (child.isSkinnedMesh) sourceSkeleton = child.skeleton; });
-
-                        if (targetSkeleton && sourceSkeleton && window.Retargeter) {
-                            retargeter = new Retargeter(targetModel, sourceModel);
-                            statusDiv.className = 'success';
-                            statusDiv.innerText = `Auto-Retargeting BERHASIL! Memutar ${animName}...`;
-                        } else {
-                            // Fallback jika tidak ada pustaka Retargeter
-                            const cloneClip = clip.clone();
-                            const actionTarget = targetMixer.clipAction(cloneClip);
-                            actionTarget.play();
-                            statusDiv.className = 'success';
-                            statusDiv.innerText = `Memutar gerakan ${animName}...`;
-                        }
-                    } catch (err) {
-                        console.warn('Fallback ke penyesuaian dasar:', err);
-                        const cloneClip = clip.clone();
-                        const actionTarget = targetMixer.clipAction(cloneClip);
-                        actionTarget.play();
-                        statusDiv.className = 'success';
-                        statusDiv.innerText = `Memutar gerakan ${animName}...`;
-                    }
-
-                } else {
-                    statusDiv.className = 'error';
-                    statusDiv.innerText = `Klip animasi ${animName} tidak ditemukan.`;
-                }
-            }, undefined, (err) => {
-                console.error(err);
-                statusDiv.className = 'error';
-                statusDiv.innerText = 'Error: Gagal mengambil file animasi dari library.';
-            });
+            document.getElementById('status').innerText = 'Mengirim koordinat titik ke server Auto-Rigging...';
+            
+            // Kirim data koordinat marker ke backend Kaggle
+            console.log('Koordinat Sendi:', JSON.stringify(markers));
         }
 
-        // --- 3. RESET T-POSE ---
-        function resetToTPose() {
-            if (targetMixer) targetMixer.stopAllAction();
-            if (sourceMixer) sourceMixer.stopAllAction();
-            retargeter = null;
-            document.getElementById('status').innerText = 'Karakter dikembalikan ke T-Pose.';
+        function animate() {
+            requestAnimationFrame(animate);
+            renderer.render(scene, camera);
         }
-
-        // --- 4. CONTROLS ---
-        function togglePlayPause() {
-            isPlaying = !isPlaying;
-            document.getElementById('status').innerText = isPlaying ? 'Animasi diputar.' : 'Animasi di-pause.';
-        }
+        animate();
     </script>
 </body>
 </html>
