@@ -7,21 +7,43 @@
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
     <style>
-        body { margin: 0; display: flex; height: 100vh; background: #121212; color: #fff; font-family: sans-serif; }
-        #sidebar { width: 300px; padding: 20px; background: #1e1e1e; display: flex; flex-direction: column; gap: 10px; }
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body { margin: 0; display: flex; height: 100vh; background: #121212; color: #fff; font-family: 'Segoe UI', sans-serif; }
+        #sidebar { width: 320px; padding: 20px; background: #1e1e1e; display: flex; flex-direction: column; gap: 12px; border-right: 1px solid #333; overflow-y: auto; }
         #canvas-container { flex: 1; }
-        button { padding: 10px; background: #4CAF50; border: none; color: #fff; font-weight: bold; cursor: pointer; border-radius: 4px; }
-        .step { font-size: 0.85rem; color: #aaa; }
+        .input-group { display: flex; flex-direction: column; gap: 4px; }
+        label { font-size: 0.8rem; color: #aaa; }
+        input[type="text"], input[type="file"] { padding: 8px; background: #2a2a2a; border: 1px solid #333; color: #fff; border-radius: 4px; font-size: 0.85rem; }
+        button { padding: 12px; background: #4CAF50; border: none; color: #fff; font-weight: bold; cursor: pointer; border-radius: 4px; transition: 0.2s; }
+        button:hover { background: #45a049; }
+        button:disabled { background: #555; cursor: not-allowed; }
+        .step { font-size: 0.85rem; color: #ccc; background: #252525; padding: 10px; border-radius: 4px; }
+        .step ol { margin-left: 18px; margin-top: 4px; }
+        #status { font-size: 0.8rem; padding: 8px; border-radius: 4px; background: #222; color: #bbb; word-break: break-all; }
+        .success { color: #4CAF50 !important; }
+        .error { color: #f44336 !important; }
     </style>
 </head>
 <body>
 
     <div id="sidebar">
         <h2>Auto-Rigger Web UI</h2>
-        <input type="file" id="meshFile" accept=".glb, .gltf, .obj" onchange="loadMesh(event)">
+        
+        <!-- Kolom Tempel URL Localtunnel -->
+        <div class="input-group">
+            <label for="apiUrl">Backend Localtunnel URL (Kaggle)</label>
+            <input type="text" id="apiUrl" placeholder="https://fuzzy-crabs-heal.loca.lt">
+        </div>
+
+        <hr style="border-color: #333;">
+
+        <div class="input-group">
+            <label>1. Upload File 3D Mesh</label>
+            <input type="file" id="meshFile" accept=".glb, .gltf, .obj" onchange="loadMesh(event)">
+        </div>
         
         <div class="step">
-            <p><strong>Langkah Penandaan Titik:</strong></p>
+            <p><strong>2. Langkah Penandaan Titik:</strong></p>
             <ol>
                 <li>Klik <b>Dagu (Chin)</b></li>
                 <li>Klik <b>Siku (Elbow)</b></li>
@@ -30,8 +52,9 @@
             </ol>
         </div>
 
-        <button onclick="sendToAutoRigger()">🚀 Process Auto-Rigging</button>
-        <div id="status">Status: Upload mesh tanpa tulang...</div>
+        <button id="rigBtn" onclick="sendToAutoRigger()">🚀 Process Auto-Rigging</button>
+        
+        <div id="status">Status: Tempel URL Kaggle & upload mesh tanpa tulang.</div>
     </div>
 
     <div id="canvas-container"></div>
@@ -46,6 +69,7 @@
 
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(container.clientWidth, container.clientHeight);
+        renderer.setPixelRatio(window.devicePixelRatio);
         container.appendChild(renderer.domElement);
 
         const controls = new THREE.OrbitControls(camera, renderer.domElement);
@@ -55,28 +79,36 @@
         dirLight.position.set(3, 10, 5);
         scene.add(dirLight);
 
+        let rawFile = null;
         let currentMesh = null;
         const markers = [];
         const raycaster = new THREE.Raycaster();
         const mouse = new THREE.Vector2();
 
         function loadMesh(event) {
-            const file = event.target.files[0];
+            rawFile = event.target.files[0];
+            if (!rawFile) return;
+
             const reader = new FileReader();
-            reader.readAsArrayBuffer(file);
+            reader.readAsArrayBuffer(rawFile);
             reader.onload = (e) => {
                 new THREE.GLTFLoader().parse(e.target.result, '', (gltf) => {
                     if (currentMesh) scene.remove(currentMesh);
                     currentMesh = gltf.scene;
                     scene.add(currentMesh);
-                    document.getElementById('status').innerText = 'Klik pada model untuk menandai posisi sendi!';
+
+                    const box = new THREE.Box3().setFromObject(currentMesh);
+                    const center = box.getCenter(new THREE.Vector3());
+                    controls.target.copy(center);
+
+                    document.getElementById('status').innerText = 'Klik pada model 3D untuk menandai titik sendi!';
                 });
             };
         }
 
         // Fitur Klik Penanda Titik (Raycasting)
         window.addEventListener('pointerdown', (e) => {
-            if (!currentMesh) return;
+            if (!currentMesh || markers.length >= 4) return;
             
             mouse.x = (e.clientX - container.offsetLeft) / container.clientWidth * 2 - 1;
             mouse.y = -(e.clientY / container.clientHeight) * 2 + 1;
@@ -87,7 +119,6 @@
             if (intersects.length > 0) {
                 const point = intersects[0].point;
                 
-                // Buat Marker Bola Merah di titik klik
                 const markerGeo = new THREE.SphereGeometry(0.03, 16, 16);
                 const markerMat = new THREE.MeshBasicMaterial({ color: 0xff0000 });
                 const marker = new THREE.Mesh(markerGeo, markerMat);
@@ -95,20 +126,63 @@
                 scene.add(marker);
 
                 markers.push({ x: point.x, y: point.y, z: point.z });
-                document.getElementById('status').innerText = `Titik ${markers.length} ditandai!`;
+                
+                const names = ["Dagu", "Siku", "Lutut", "Selangkangan"];
+                document.getElementById('status').innerText = `Titik ${markers.length} (${names[markers.length - 1]}) berhasil ditandai!`;
             }
         });
 
+        // Kirim ke Backend Kaggle API
         async function sendToAutoRigger() {
-            if (markers.length < 4) {
-                alert('Tandai minimal 4 titik sendi terlebih dahulu!');
+            let baseUrl = document.getElementById('apiUrl').value.trim();
+            const statusDiv = document.getElementById('status');
+            const btn = document.getElementById('rigBtn');
+
+            if (!baseUrl || !rawFile) {
+                alert('Isi URL Localtunnel dan Upload file 3D terlebih dahulu!');
                 return;
             }
 
-            document.getElementById('status').innerText = 'Mengirim koordinat titik ke server Auto-Rigging...';
-            
-            // Kirim data koordinat marker ke backend Kaggle
-            console.log('Koordinat Sendi:', JSON.stringify(markers));
+            if (!baseUrl.startsWith('http')) baseUrl = 'https://' + baseUrl;
+            if (baseUrl.endsWith('/')) baseUrl = baseUrl.slice(0, -1);
+
+            statusDiv.className = '';
+            statusDiv.innerText = '⏳ Mengirim data ke Blender Backend...';
+            btn.disabled = true;
+
+            const formData = new FormData();
+            formData.append('file', rawFile);
+            formData.append('markers', JSON.stringify(markers));
+
+            try {
+                const response = await fetch(`${baseUrl}/auto-rig`, {
+                    method: 'POST',
+                    headers: { 'Bypass-Tunnel-Remainder': 'true' },
+                    body: formData
+                });
+
+                if (!response.ok) throw new Error(`Server Error: ${response.status}`);
+
+                const blob = await response.blob();
+                const blobUrl = URL.createObjectURL(blob);
+
+                statusDiv.className = 'success';
+                statusDiv.innerText = '✅ Auto-Rigging Selesai! Memuat hasil .glb baru...';
+
+                // Load File Rigged .GLB Baru
+                new THREE.GLTFLoader().load(blobUrl, (gltf) => {
+                    if (currentMesh) scene.remove(currentMesh);
+                    currentMesh = gltf.scene;
+                    scene.add(currentMesh);
+                });
+
+            } catch (err) {
+                console.error(err);
+                statusDiv.className = 'error';
+                statusDiv.innerText = `Error: ${err.message}. Cek URL Localtunnel.`;
+            } finally {
+                btn.disabled = false;
+            }
         }
 
         function animate() {
