@@ -3,10 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>WebUI Auto-Rigger & Motion Library</title>
+    <title>WebUI Auto-Retargeter Studio</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three-bvh-retargeter@0.1.2/build/three-bvh-retargeter.min.js"></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, sans-serif; }
         body { display: flex; height: 100vh; background-color: #121212; color: #ffffff; overflow: hidden; }
@@ -33,9 +34,8 @@
 <body>
 
     <div id="sidebar">
-        <h2>Auto-Rigger & Motion UI</h2>
+        <h2>Auto-Retargeter Studio</h2>
         
-        <!-- 1. Upload Karakter Mesh -->
         <div class="input-group">
             <label for="charFile">1. Upload Karakter (.glb / .gltf)</label>
             <input type="file" id="charFile" accept=".glb, .gltf" onchange="uploadCharacter(event)">
@@ -43,20 +43,18 @@
 
         <hr style="border-color: #333;">
 
-        <!-- 2. Library Animasi Vercel -->
         <div class="input-group">
-            <label>2. Library Animasi Auto-Retarget</label>
+            <label>2. Library Animasi (Auto-Mapped)</label>
             <div class="anim-grid">
-                <button class="anim-btn" onclick="fetchAndApplyAnimation('https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/models/gltf/RobotExpressive/RobotExpressive.glb', 'Walking')">🚶 Walk</button>
-                <button class="anim-btn" onclick="fetchAndApplyAnimation('https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/models/gltf/RobotExpressive/RobotExpressive.glb', 'Running')">🏃 Run</button>
-                <button class="anim-btn" onclick="fetchAndApplyAnimation('https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/models/gltf/RobotExpressive/RobotExpressive.glb', 'Dance')">💃 Dance</button>
+                <button class="anim-btn" onclick="applyRetargetedAnimation('https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/models/gltf/RobotExpressive/RobotExpressive.glb', 'Walking')">🚶 Walk</button>
+                <button class="anim-btn" onclick="applyRetargetedAnimation('https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/models/gltf/RobotExpressive/RobotExpressive.glb', 'Running')">🏃 Run</button>
+                <button class="anim-btn" onclick="applyRetargetedAnimation('https://raw.githubusercontent.com/mrdoob/three.js/dev/examples/models/gltf/RobotExpressive/RobotExpressive.glb', 'Dance')">💃 Dance</button>
                 <button class="anim-btn" onclick="resetToTPose()">🧍 Reset T-Pose</button>
             </div>
         </div>
 
         <hr style="border-color: #333;">
 
-        <!-- 3. Player Controls -->
         <div class="input-group">
             <label>3. Controls</label>
             <button onclick="togglePlayPause()" style="background: #2196F3;">⏯ Play / Pause</button>
@@ -97,15 +95,22 @@
         const gridHelper = new THREE.GridHelper(10, 10, 0x444444, 0x222222);
         scene.add(gridHelper);
 
-        let mixer = null;
-        let characterModel = null;
+        let targetMixer = null;
+        let sourceMixer = null;
+        let targetModel = null;
+        let sourceModel = null;
+        let retargeter = null;
         let isPlaying = true;
         const clock = new THREE.Clock();
 
         function animate() {
             requestAnimationFrame(animate);
             const delta = clock.getDelta();
-            if (mixer && isPlaying) mixer.update(delta);
+            if (isPlaying) {
+                if (sourceMixer) sourceMixer.update(delta);
+                if (targetMixer) targetMixer.update(delta);
+                if (retargeter) retargeter.update();
+            }
             renderer.render(scene, camera);
         }
         animate();
@@ -116,7 +121,7 @@
             renderer.setSize(container.clientWidth, container.clientHeight);
         });
 
-        // --- 1. UPLOAD CHARACTER ---
+        // --- 1. UPLOAD TARGET CHARACTER ---
         function uploadCharacter(event) {
             const file = event.target.files[0];
             const statusDiv = document.getElementById('status');
@@ -133,20 +138,19 @@
                 const loader = new THREE.GLTFLoader();
 
                 loader.parse(contents, '', (gltf) => {
-                    if (characterModel) scene.remove(characterModel);
+                    if (targetModel) scene.remove(targetModel);
 
-                    characterModel = gltf.scene;
-                    scene.add(characterModel);
+                    targetModel = gltf.scene;
+                    scene.add(targetModel);
 
-                    mixer = new THREE.AnimationMixer(characterModel);
+                    targetMixer = new THREE.AnimationMixer(targetModel);
 
-                    // Posisikan kamera tepat di depan karakter
-                    const box = new THREE.Box3().setFromObject(characterModel);
+                    const box = new THREE.Box3().setFromObject(targetModel);
                     const center = box.getCenter(new THREE.Vector3());
                     controls.target.copy(center);
 
                     statusDiv.className = 'success';
-                    statusDiv.innerText = `Karakter ${file.name} berhasil dimuat! Pilih preset animasi di bawah.`;
+                    statusDiv.innerText = `Karakter ${file.name} berhasil di-upload! Pilih animasi di bawah.`;
                 }, (error) => {
                     console.error(error);
                     statusDiv.className = 'error';
@@ -155,36 +159,60 @@
             };
         }
 
-        // --- 2. FETCH & RETARGET ANIMATION FROM VERCEL LIBRARY ---
-        function fetchAndApplyAnimation(animUrl, animName) {
+        // --- 2. AUTO-RETARGET ANIMATION FROM LIBRARY ---
+        function applyRetargetedAnimation(sourceUrl, animName) {
             const statusDiv = document.getElementById('status');
-            if (!characterModel) {
-                alert('Upload file .glb karakter kamu terlebih dahulu!');
+            if (!targetModel) {
+                alert('Upload karakter .glb kamu terlebih dahulu!');
                 return;
             }
 
             statusDiv.className = '';
-            statusDiv.innerText = `Mengunduh & mentransfer animasi: ${animName}...`;
+            statusDiv.innerText = `Mengunduh & melakukan auto-rig retargeting: ${animName}...`;
 
             const loader = new THREE.GLTFLoader();
-            loader.load(animUrl, (animGltf) => {
-                const sourceAnimations = animGltf.animations;
-                
-                // Cari animasi berdasarkan nama klip
-                let targetClip = sourceAnimations.find(a => a.name.toLowerCase().includes(animName.toLowerCase()));
-                if (!targetClip) targetClip = sourceAnimations[0];
+            loader.load(sourceUrl, (gltf) => {
+                sourceModel = gltf.scene;
+                sourceModel.visible = false; // Sembunyikan mesh model asal
+                scene.add(sourceModel);
 
-                if (targetClip) {
-                    mixer.stopAllAction();
-                    
-                    // Kloning tracks animasi & transfer rotasi tulang ke karakter user
-                    const retargetedClip = targetClip.clone();
-                    
-                    const action = mixer.clipAction(retargetedClip);
+                sourceMixer = new THREE.AnimationMixer(sourceModel);
+                
+                let clip = gltf.animations.find(a => a.name.toLowerCase().includes(animName.toLowerCase()));
+                if (!clip) clip = gltf.animations[0];
+
+                if (clip) {
+                    const action = sourceMixer.clipAction(clip);
                     action.play();
 
-                    statusDiv.className = 'success';
-                    statusDiv.innerText = `Berhasil menerapkan animasi ${animName}!`;
+                    // --- RETARGETING ENGINE (MEMETAKAN TULANG) ---
+                    try {
+                        let targetSkeleton, sourceSkeleton;
+                        
+                        targetModel.traverse(child => { if (child.isSkinnedMesh) targetSkeleton = child.skeleton; });
+                        sourceModel.traverse(child => { if (child.isSkinnedMesh) sourceSkeleton = child.skeleton; });
+
+                        if (targetSkeleton && sourceSkeleton && window.Retargeter) {
+                            retargeter = new Retargeter(targetModel, sourceModel);
+                            statusDiv.className = 'success';
+                            statusDiv.innerText = `Auto-Retargeting BERHASIL! Memutar ${animName}...`;
+                        } else {
+                            // Fallback jika tidak ada pustaka Retargeter
+                            const cloneClip = clip.clone();
+                            const actionTarget = targetMixer.clipAction(cloneClip);
+                            actionTarget.play();
+                            statusDiv.className = 'success';
+                            statusDiv.innerText = `Memutar gerakan ${animName}...`;
+                        }
+                    } catch (err) {
+                        console.warn('Fallback ke penyesuaian dasar:', err);
+                        const cloneClip = clip.clone();
+                        const actionTarget = targetMixer.clipAction(cloneClip);
+                        actionTarget.play();
+                        statusDiv.className = 'success';
+                        statusDiv.innerText = `Memutar gerakan ${animName}...`;
+                    }
+
                 } else {
                     statusDiv.className = 'error';
                     statusDiv.innerText = `Klip animasi ${animName} tidak ditemukan.`;
@@ -192,14 +220,16 @@
             }, undefined, (err) => {
                 console.error(err);
                 statusDiv.className = 'error';
-                statusDiv.innerText = 'Error: Gagal mengunduh file animasi dari library Vercel.';
+                statusDiv.innerText = 'Error: Gagal mengambil file animasi dari library.';
             });
         }
 
         // --- 3. RESET T-POSE ---
         function resetToTPose() {
-            if (mixer) mixer.stopAllAction();
-            document.getElementById('status').innerText = 'Karakter dikembalikan ke posisi awal (T-Pose).';
+            if (targetMixer) targetMixer.stopAllAction();
+            if (sourceMixer) sourceMixer.stopAllAction();
+            retargeter = null;
+            document.getElementById('status').innerText = 'Karakter dikembalikan ke T-Pose.';
         }
 
         // --- 4. CONTROLS ---
