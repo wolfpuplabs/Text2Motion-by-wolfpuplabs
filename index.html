@@ -2,27 +2,32 @@
 <html lang="id">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Mixamo-Style Auto-Rigger UI</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
     <style>
         * { box-sizing: border-box; margin: 0; padding: 0; }
-        body { margin: 0; display: flex; height: 100vh; background: #121212; color: #fff; font-family: 'Segoe UI', sans-serif; }
-        #sidebar { width: 320px; padding: 20px; background: #1e1e1e; display: flex; flex-direction: column; gap: 12px; border-right: 1px solid #333; overflow-y: auto; z-index: 10; }
-        #canvas-container { flex: 1; position: relative; }
+        body { margin: 0; display: flex; height: 100vh; background: #121212; color: #fff; font-family: 'Segoe UI', sans-serif; overflow: hidden; }
+        #sidebar { width: 320px; min-width: 320px; padding: 20px; background: #1e1e1e; display: flex; flex-direction: column; gap: 12px; border-right: 1px solid #333; overflow-y: auto; z-index: 10; }
+        #canvas-container { flex: 1; position: relative; height: 100vh; touch-action: none; }
         .input-group { display: flex; flex-direction: column; gap: 4px; }
         label { font-size: 0.8rem; color: #aaa; }
         input[type="text"], input[type="file"] { padding: 8px; background: #2a2a2a; border: 1px solid #333; color: #fff; border-radius: 4px; font-size: 0.85rem; }
-        button { padding: 12px; background: #4CAF50; border: none; color: #fff; font-weight: bold; cursor: pointer; border-radius: 4px; transition: 0.2s; }
+        button { padding: 10px; background: #4CAF50; border: none; color: #fff; font-weight: bold; cursor: pointer; border-radius: 4px; transition: 0.2s; }
         button:hover { background: #45a049; }
         button:disabled { background: #555; cursor: not-allowed; }
+        .btn-sec { background: #333; font-size: 0.8rem; padding: 8px; margin-top: 4px; }
+        .btn-sec:hover { background: #444; }
+        .btn-danger { background: #d32f2f; font-size: 0.8rem; padding: 8px; margin-top: 4px; }
+        .btn-danger:hover { background: #b71c1c; }
         .step { font-size: 0.85rem; color: #ccc; background: #252525; padding: 10px; border-radius: 4px; }
         .step ol { margin-left: 18px; margin-top: 4px; }
         #status { font-size: 0.8rem; padding: 8px; border-radius: 4px; background: #222; color: #bbb; word-break: break-all; }
         .success { color: #4CAF50 !important; }
         .error { color: #f44336 !important; }
-        #reset-markers-btn { background: #d32f2f; padding: 6px; font-size: 0.75rem; margin-top: 5px; }
+        .btn-group { display: flex; gap: 6px; }
     </style>
 </head>
 <body>
@@ -41,6 +46,14 @@
             <label>1. Upload File 3D Mesh</label>
             <input type="file" id="meshFile" accept=".glb, .gltf, .obj" onchange="loadMesh(event)">
         </div>
+
+        <div class="input-group">
+            <label>Atur Orientasi Model (Jika Miring):</label>
+            <div class="btn-group">
+                <button class="btn-sec" style="flex:1" onclick="rotateModelY()">🔄 Putar 90°</button>
+                <button class="btn-sec" style="flex:1" onclick="resetCameraView()">👁️ Reset Kamera</button>
+            </div>
+        </div>
         
         <div class="step">
             <p><strong>2. Langkah Penandaan Titik:</strong></p>
@@ -50,7 +63,7 @@
                 <li>Klik <b>Lutut (Knee)</b></li>
                 <li>Klik <b>Selangkangan (Groin)</b></li>
             </ol>
-            <button id="reset-markers-btn" onclick="resetMarkers()">Reset Titik Penanda</button>
+            <button class="btn-danger" style="width:100%" onclick="resetMarkers()">Reset Titik Penanda</button>
         </div>
 
         <button id="rigBtn" onclick="sendToAutoRigger()">🚀 Process Auto-Rigging</button>
@@ -65,9 +78,8 @@
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x1a1a1a);
 
-        // Atur Posisi Kamera Tepat Menghadap Karakter (Depan/Front View)
         const camera = new THREE.PerspectiveCamera(45, container.clientWidth / container.clientHeight, 0.1, 100);
-        camera.position.set(0, 1.0, 3.5); 
+        camera.position.set(0, 1.2, 3.5);
 
         const renderer = new THREE.WebGLRenderer({ antialias: true });
         renderer.setSize(container.clientWidth, container.clientHeight);
@@ -77,7 +89,6 @@
         const controls = new THREE.OrbitControls(camera, renderer.domElement);
         controls.enableDamping = true;
 
-        // Pencahayaan
         scene.add(new THREE.AmbientLight(0xffffff, 1.2));
         const dirLight = new THREE.DirectionalLight(0xffffff, 1.5);
         dirLight.position.set(2, 5, 5);
@@ -103,64 +114,84 @@
                     if (currentMesh) scene.remove(currentMesh);
                     currentMesh = gltf.scene;
                     
-                    // PERBAIKAN ORIENTASI: Reset Rotasi & Posisikan di Tengah
-                    currentMesh.rotation.set(0, 0, 0);
-                    
+                    // Center Model di Origin
                     const box = new THREE.Box3().setFromObject(currentMesh);
                     const center = box.getCenter(new THREE.Vector3());
                     const size = box.getSize(new THREE.Vector3());
 
-                    // Center model ke origin (0,0,0)
-                    currentMesh.position.x += (currentMesh.position.x - center.x);
-                    currentMesh.position.y += (currentMesh.position.y - box.min.y); 
-                    currentMesh.position.z += (currentMesh.position.z - center.z);
+                    currentMesh.position.x -= center.x;
+                    currentMesh.position.y -= box.min.y;
+                    currentMesh.position.z -= center.z;
 
                     scene.add(currentMesh);
 
-                    // Atur fokus target kamera ke bagian dada/badan
                     controls.target.set(0, size.y / 2, 0);
                     camera.position.set(0, size.y / 2, size.y * 2.2);
                     controls.update();
 
-                    document.getElementById('status').innerText = 'Klik pada model 3D untuk menandai titik: 1. Dagu';
+                    document.getElementById('status').innerText = 'Klik pada model 3D untuk menandai: 1. Dagu (Chin)';
                 });
             };
         }
 
-        // PERBAIKAN TITIK PENANDA: Raycasting & Visual Bola Merah di Depan Surface
-        window.addEventListener('pointerdown', (e) => {
-            // Hanya deteksi klik jika klik di dalam area canvas Three.js
-            if (e.clientX < 320 || !currentMesh || markers.length >= 4) return;
-            
-            mouse.x = ((e.clientX - 320) / (window.innerWidth - 320)) * 2 - 1;
-            mouse.y = -(e.clientY / window.innerHeight) * 2 + 1;
+        // Putar Model 90 Derajat Jika Hadap Samping
+        function rotateModelY() {
+            if (currentMesh) {
+                currentMesh.rotation.y += Math.PI / 2;
+            }
+        }
+
+        function resetCameraView() {
+            if (currentMesh) {
+                const box = new THREE.Box3().setFromObject(currentMesh);
+                const size = box.getSize(new THREE.Vector3());
+                controls.target.set(0, size.y / 2, 0);
+                camera.position.set(0, size.y / 2, size.y * 2.2);
+                controls.update();
+            }
+        }
+
+        // PERBAIKAN RAYCASTING & BOLA MERAH UNTUK IPAD
+        renderer.domElement.addEventListener('pointerdown', (e) => {
+            if (!currentMesh || markers.length >= 4) return;
+
+            const rect = renderer.domElement.getBoundingClientRect();
+            mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+            mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
 
             raycaster.setFromCamera(mouse, camera);
             const intersects = raycaster.intersectObject(currentMesh, true);
 
             if (intersects.length > 0) {
-                const point = intersects[0].point;
-                
-                // Buat Marker Bola Merah yang SELALU TERLIHAT (Tidak Tenggelam dalam Kulit)
-                const markerGeo = new THREE.SphereGeometry(0.04, 16, 16);
+                const hit = intersects[0];
+                const point = hit.point;
+
+                // Geser titik sedikit ke luar permukaan kulit agar tidak tenggelam
+                if (hit.face) {
+                    const normal = hit.face.normal.clone().transformDirection(hit.object.matrixWorld);
+                    point.add(normal.multiplyScalar(0.015));
+                }
+
+                // Buat Bola Merah Penanda
+                const markerGeo = new THREE.SphereGeometry(0.035, 16, 16);
                 const markerMat = new THREE.MeshBasicMaterial({ 
                     color: 0xff0000, 
-                    depthTest: false, // Bikin titik tidak tertutup mesh 3D
+                    depthTest: false,
                     transparent: true 
                 });
                 const marker = new THREE.Mesh(markerGeo, markerMat);
                 marker.position.copy(point);
-                marker.renderOrder = 999; // Prioritas render paling atas
+                marker.renderOrder = 9999;
 
                 scene.add(marker);
                 markerObjects.push(marker);
                 markers.push({ x: point.x, y: point.y, z: point.z });
-                
+
                 const names = ["Dagu", "Siku", "Lutut", "Selangkangan"];
                 if (markers.length < 4) {
-                    document.getElementById('status').innerText = `Titik ${markers.length} (${names[markers.length - 1]}) ditandai! Selanjutnya: ${names[markers.length]}`;
+                    document.getElementById('status').innerText = `✅ ${names[markers.length - 1]} ditandai! Selanjutnya klik: ${names[markers.length]}`;
                 } else {
-                    document.getElementById('status').innerText = '✅ Semua 4 titik ditandai! Klik "Process Auto-Rigging".';
+                    document.getElementById('status').innerText = '🎉 Semua 4 titik ditandai! Klik "Process Auto-Rigging".';
                 }
             }
         });
@@ -169,10 +200,9 @@
             markerObjects.forEach(m => scene.remove(m));
             markerObjects.length = 0;
             markers.length = 0;
-            document.getElementById('status').innerText = 'Titik di-reset. Klik model untuk mulai menandai ulang dari Dagu.';
+            document.getElementById('status').innerText = 'Titik di-reset. Mulai tandai dari Dagu.';
         }
 
-        // Kirim ke Backend Kaggle API
         async function sendToAutoRigger() {
             let baseUrl = document.getElementById('apiUrl').value.trim();
             const statusDiv = document.getElementById('status');
@@ -187,7 +217,7 @@
             if (baseUrl.endsWith('/')) baseUrl = baseUrl.slice(0, -1);
 
             statusDiv.className = '';
-            statusDiv.innerText = '⏳ Mengirim data ke Blender Backend... Mohon tunggu (~15-30 detik)';
+            statusDiv.innerText = '⏳ Memproses Auto-Rigging di Blender Backend (~15-30 detik)...';
             btn.disabled = true;
 
             const formData = new FormData();
@@ -209,7 +239,6 @@
                 statusDiv.className = 'success';
                 statusDiv.innerText = '✅ Auto-Rigging Selesai! Memuat hasil .glb baru...';
 
-                // Hapus titik penanda & load file rigged baru
                 resetMarkers();
                 new THREE.GLTFLoader().load(blobUrl, (gltf) => {
                     if (currentMesh) scene.remove(currentMesh);
@@ -220,7 +249,7 @@
             } catch (err) {
                 console.error(err);
                 statusDiv.className = 'error';
-                statusDiv.innerText = `Error: ${err.message}. Cek apakah URL Kaggle aktif.`;
+                statusDiv.innerText = `Error: ${err.message}. Pastikan URL Kaggle aktif.`;
             } finally {
                 btn.disabled = false;
             }
@@ -234,9 +263,11 @@
         animate();
 
         window.addEventListener('resize', () => {
-            camera.aspect = (window.innerWidth - 320) / window.innerHeight;
+            const w = container.clientWidth;
+            const h = container.clientHeight;
+            camera.aspect = w / h;
             camera.updateProjectionMatrix();
-            renderer.setSize(window.innerWidth - 320, window.innerHeight);
+            renderer.setSize(w, h);
         });
     </script>
 </body>
