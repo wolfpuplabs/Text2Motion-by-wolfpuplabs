@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mesh2Motion WebUI</title>
+    <title>Mesh2Motion WebUI (Custom Character)</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
@@ -12,13 +12,14 @@
         body { display: flex; height: 100vh; background-color: #121212; color: #ffffff; overflow: hidden; }
         
         /* Panel Kontrol Kiri */
-        #sidebar { width: 340px; background: #1e1e1e; padding: 20px; display: flex; flex-direction: column; gap: 15px; border-right: 1px solid #333; z-index: 10; }
+        #sidebar { width: 340px; background: #1e1e1e; padding: 20px; display: flex; flex-direction: column; gap: 15px; border-right: 1px solid #333; z-index: 10; overflow-y: auto; }
         h2 { color: #4CAF50; font-size: 1.2rem; margin-bottom: 5px; }
         .input-group { display: flex; flex-direction: column; gap: 5px; }
         label { font-size: 0.85rem; color: #aaa; }
         input, textarea, button { width: 100%; padding: 10px; border-radius: 6px; border: 1px solid #333; background: #2a2a2a; color: #fff; font-size: 0.9rem; }
-        textarea { resize: vertical; height: 80px; }
-        button { background: #4CAF50; border: none; font-weight: bold; cursor: pointer; transition: 0.2s; margin-top: 10px; }
+        input[type="file"] { padding: 5px; background: #222; }
+        textarea { resize: vertical; height: 70px; }
+        button { background: #4CAF50; border: none; font-weight: bold; cursor: pointer; transition: 0.2s; margin-top: 5px; }
         button:hover { background: #45a049; }
         button:disabled { background: #555; cursor: not-allowed; }
         
@@ -37,8 +38,17 @@
     <div id="sidebar">
         <h2>Mesh2Motion WebUI</h2>
         
+        <!-- 1. Upload Character Sendiri -->
         <div class="input-group">
-            <label for="apiUrl">Localtunnel URL (dari Kaggle)</label>
+            <label for="charFile">Upload Character (.glb / .gltf)</label>
+            <input type="file" id="charFile" accept=".glb, .gltf" onchange="uploadCharacter(event)">
+        </div>
+
+        <hr style="border-color: #333;">
+
+        <!-- 2. Form AI Generator -->
+        <div class="input-group">
+            <label for="apiUrl">Localtunnel URL (Kaggle)</label>
             <input type="text" id="apiUrl" placeholder="https://xxxx.loca.lt">
         </div>
 
@@ -49,7 +59,7 @@
 
         <button id="generateBtn" onclick="generateMotion()">Generate Motion</button>
 
-        <div id="status">Status: Siap (Pastikan URL Kaggle sudah terisi)</div>
+        <div id="status">Status: Siap (Upload karakter atau masukkan URL Kaggle)</div>
     </div>
 
     <div id="canvas-container">
@@ -57,7 +67,7 @@
     </div>
 
     <script>
-        // --- 1. SETUP THREE.JS (VIEWER 3D) ---
+        // --- SETUP THREE.JS (VIEWER 3D) ---
         const container = document.getElementById('canvas-container');
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x1a1a1a);
@@ -90,7 +100,6 @@
         let currentModel = null;
         const clock = new THREE.Clock();
 
-        // Animation Loop
         function animate() {
             requestAnimationFrame(animate);
             const delta = clock.getDelta();
@@ -99,14 +108,53 @@
         }
         animate();
 
-        // Responsive Window Resize
         window.addEventListener('resize', () => {
             camera.aspect = container.clientWidth / container.clientHeight;
             camera.updateProjectionMatrix();
             renderer.setSize(container.clientWidth, container.clientHeight);
         });
 
-        // --- 2. INTEGRASI BACKEND MESH2MOTION VIA LOCALTUNNEL ---
+        // --- FUNGSI UPLOAD CHARACTER LOKAL ---
+        function uploadCharacter(event) {
+            const file = event.target.files[0];
+            const statusDiv = document.getElementById('status');
+
+            if (!file) return;
+
+            statusDiv.className = '';
+            statusDiv.innerText = `Status: Memuat file ${file.name}...`;
+
+            const reader = new FileReader();
+            reader.readAsArrayBuffer(file);
+
+            reader.onload = function (e) {
+                const contents = e.target.result;
+                const loader = new THREE.GLTFLoader();
+
+                loader.parse(contents, '', (gltf) => {
+                    if (currentModel) scene.remove(currentModel);
+
+                    currentModel = gltf.scene;
+                    scene.add(currentModel);
+
+                    // Set animasi jika file yang diupload sudah ada gerakannya
+                    if (gltf.animations && gltf.animations.length > 0) {
+                        mixer = new THREE.AnimationMixer(currentModel);
+                        const action = mixer.clipAction(gltf.animations[0]);
+                        action.play();
+                    }
+
+                    statusDiv.className = 'success';
+                    statusDiv.innerText = `Status: Karakter ${file.name} berhasil di-upload!`;
+                }, (error) => {
+                    console.error(error);
+                    statusDiv.className = 'error';
+                    statusDiv.innerText = 'Status Error: Gagal membaca file 3D.';
+                });
+            };
+        }
+
+        // --- GENERATE MOTION DARI KAGGLE ---
         async function generateMotion() {
             let baseUrl = document.getElementById('apiUrl').value.trim();
             const promptText = document.getElementById('prompt').value.trim();
@@ -119,7 +167,6 @@
                 return;
             }
 
-            // Normalisasi URL
             if (!baseUrl.startsWith('http')) baseUrl = 'https://' + baseUrl;
             if (baseUrl.endsWith('/')) baseUrl = baseUrl.slice(0, -1);
 
@@ -129,12 +176,11 @@
             loading.style.display = 'block';
 
             try {
-                // Request ke API FastAPI/Flask di Kaggle
                 const response = await fetch(`${baseUrl}/generate`, {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
-                        'Bypass-Tunnel-Remainder': 'true' // Bypass warning header localtunnel
+                        'Bypass-Tunnel-Remainder': 'true'
                     },
                     body: JSON.stringify({ prompt: promptText })
                 });
@@ -142,46 +188,36 @@
                 if (!response.ok) throw new Error(`HTTP Error status: ${response.status}`);
 
                 const data = await response.json();
-                
-                // Pastikan backend mengembalikan URL file .gltf / .glb
                 const gltfUrl = data.file_url.startsWith('http') ? data.file_url : `${baseUrl}${data.file_url}`;
                 
                 statusDiv.className = 'success';
-                statusDiv.innerText = 'Status: Berhasil! Memuat file 3D...';
+                statusDiv.innerText = 'Status: Berhasil! Memuat animasi AI...';
 
-                // Load File 3D ke Scene
                 loadGLTFModel(gltfUrl);
 
             } catch (err) {
                 console.error(err);
                 statusDiv.className = 'error';
-                statusDiv.innerText = `Status Error: ${err.message}. Cek console & pastikan IP Localtunnel sudah di-bypass.`;
+                statusDiv.innerText = `Status Error: ${err.message}`;
             } finally {
                 btn.disabled = false;
                 loading.style.display = 'none';
             }
         }
 
-        // --- 3. MEMUAT & MEMUTAR ANIMASI GLTF/GLB ---
         function loadGLTFModel(url) {
             const loader = new THREE.GLTFLoader();
-
-            // Hapus model lama jika ada
             if (currentModel) scene.remove(currentModel);
 
             loader.load(url, (gltf) => {
                 currentModel = gltf.scene;
                 scene.add(currentModel);
 
-                // Play Animation jika file GLTF memiliki data animasi
                 if (gltf.animations && gltf.animations.length > 0) {
                     mixer = new THREE.AnimationMixer(currentModel);
                     const action = mixer.clipAction(gltf.animations[0]);
                     action.play();
                 }
-            }, undefined, (error) => {
-                console.error('Gagal memuat GLTF:', error);
-                document.getElementById('status').innerText = 'Error: Gagal merender file .gltf/.glb 3D.';
             });
         }
     </script>
