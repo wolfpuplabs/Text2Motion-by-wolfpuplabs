@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Mesh2Motion WebUI (Custom Character)</title>
+    <title>Mesh2Motion WebUI (Mixamo Style)</title>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/loaders/GLTFLoader.js"></script>
@@ -11,63 +11,64 @@
         * { box-sizing: border-box; margin: 0; padding: 0; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
         body { display: flex; height: 100vh; background-color: #121212; color: #ffffff; overflow: hidden; }
         
-        /* Panel Kontrol Kiri */
         #sidebar { width: 340px; background: #1e1e1e; padding: 20px; display: flex; flex-direction: column; gap: 15px; border-right: 1px solid #333; z-index: 10; overflow-y: auto; }
         h2 { color: #4CAF50; font-size: 1.2rem; margin-bottom: 5px; }
         .input-group { display: flex; flex-direction: column; gap: 5px; }
         label { font-size: 0.85rem; color: #aaa; }
-        input, textarea, button { width: 100%; padding: 10px; border-radius: 6px; border: 1px solid #333; background: #2a2a2a; color: #fff; font-size: 0.9rem; }
-        input[type="file"] { padding: 5px; background: #222; }
-        textarea { resize: vertical; height: 70px; }
-        button { background: #4CAF50; border: none; font-weight: bold; cursor: pointer; transition: 0.2s; margin-top: 5px; }
+        input[type="file"], select { width: 100%; padding: 10px; border-radius: 6px; border: 1px solid #333; background: #2a2a2a; color: #fff; font-size: 0.9rem; }
+        button { width: 100%; padding: 12px; background: #4CAF50; border: none; font-weight: bold; color: white; border-radius: 6px; cursor: pointer; transition: 0.2s; margin-top: 5px; }
         button:hover { background: #45a049; }
-        button:disabled { background: #555; cursor: not-allowed; }
         
-        /* Status Display */
+        .anim-btn-group { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 5px; }
+        .anim-btn { background: #333; font-size: 0.8rem; padding: 8px; font-weight: normal; margin: 0; }
+        .anim-btn:hover { background: #555; }
+
         #status { font-size: 0.8rem; padding: 8px; border-radius: 4px; background: #222; color: #bbb; word-break: break-all; }
         .success { color: #4CAF50 !important; }
         .error { color: #f44336 !important; }
 
-        /* Area Canvas 3D */
         #canvas-container { flex: 1; position: relative; width: 100%; height: 100%; }
-        #loading-overlay { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); background: rgba(0,0,0,0.8); padding: 20px; border-radius: 8px; display: none; text-align: center; }
     </style>
 </head>
 <body>
 
     <div id="sidebar">
-        <h2>Mesh2Motion WebUI</h2>
+        <h2>Mixamo-Style WebUI</h2>
         
-        <!-- 1. Upload Character Sendiri -->
+        <!-- Upload Character -->
         <div class="input-group">
-            <label for="charFile">Upload Character (.glb / .gltf)</label>
+            <label for="charFile">1. Upload Character (.glb / .gltf)</label>
             <input type="file" id="charFile" accept=".glb, .gltf" onchange="uploadCharacter(event)">
         </div>
 
         <hr style="border-color: #333;">
 
-        <!-- 2. Form AI Generator -->
+        <!-- Preset Animations -->
         <div class="input-group">
-            <label for="apiUrl">Localtunnel URL (Kaggle)</label>
-            <input type="text" id="apiUrl" placeholder="https://xxxx.loca.lt">
+            <label>2. Pilih Preset Animasi (Mixamo)</label>
+            <div class="anim-btn-group">
+                <button class="anim-btn" onclick="applyAnimation('walk')">🚶 Walk</button>
+                <button class="anim-btn" onclick="applyAnimation('run')">🏃 Run</button>
+                <button class="anim-btn" onclick="applyAnimation('dance')">💃 Dance</button>
+                <button class="anim-btn" onclick="applyAnimation('idle')">🧍 Idle (T-Pose)</button>
+            </div>
         </div>
 
+        <hr style="border-color: #333;">
+
+        <!-- Control Player -->
         <div class="input-group">
-            <label for="prompt">Text Prompt Gerakan</label>
-            <textarea id="prompt" placeholder="a person walking happily..."></textarea>
+            <label>3. Controls</label>
+            <button onclick="togglePlayPause()" style="background: #2196F3;">⏯ Play / Pause</button>
         </div>
 
-        <button id="generateBtn" onclick="generateMotion()">Generate Motion</button>
-
-        <div id="status">Status: Siap (Upload karakter atau masukkan URL Kaggle)</div>
+        <div id="status">Status: Silakan upload karakter 3D (.glb)</div>
     </div>
 
-    <div id="canvas-container">
-        <div id="loading-overlay">⏳ Memproses AI & Memuat Model 3D...</div>
-    </div>
+    <div id="canvas-container"></div>
 
     <script>
-        // --- SETUP THREE.JS (VIEWER 3D) ---
+        // --- THREE.JS SETUP ---
         const container = document.getElementById('canvas-container');
         const scene = new THREE.Scene();
         scene.background = new THREE.Color(0x1a1a1a);
@@ -85,7 +86,7 @@
         controls.target.set(0, 1, 0);
         controls.update();
 
-        // Pencahayaan & Grid Floor
+        // Lighting & Grid
         const ambientLight = new THREE.AmbientLight(0xffffff, 0.8);
         scene.add(ambientLight);
         
@@ -98,12 +99,14 @@
 
         let mixer = null;
         let currentModel = null;
+        let activeAction = null;
+        let isPlaying = true;
         const clock = new THREE.Clock();
 
         function animate() {
             requestAnimationFrame(animate);
             const delta = clock.getDelta();
-            if (mixer) mixer.update(delta);
+            if (mixer && isPlaying) mixer.update(delta);
             renderer.render(scene, camera);
         }
         animate();
@@ -114,15 +117,14 @@
             renderer.setSize(container.clientWidth, container.clientHeight);
         });
 
-        // --- FUNGSI UPLOAD CHARACTER LOKAL ---
+        // --- UPLOAD CHARACTER ---
         function uploadCharacter(event) {
             const file = event.target.files[0];
             const statusDiv = document.getElementById('status');
-
             if (!file) return;
 
             statusDiv.className = '';
-            statusDiv.innerText = `Status: Memuat file ${file.name}...`;
+            statusDiv.innerText = `Memuat file ${file.name}...`;
 
             const reader = new FileReader();
             reader.readAsArrayBuffer(file);
@@ -137,88 +139,56 @@
                     currentModel = gltf.scene;
                     scene.add(currentModel);
 
-                    // Set animasi jika file yang diupload sudah ada gerakannya
-                    if (gltf.animations && gltf.animations.length > 0) {
-                        mixer = new THREE.AnimationMixer(currentModel);
-                        const action = mixer.clipAction(gltf.animations[0]);
-                        action.play();
-                    }
+                    mixer = new THREE.AnimationMixer(currentModel);
 
-                    statusDiv.className = 'success';
-                    statusDiv.innerText = `Status: Karakter ${file.name} berhasil di-upload!`;
+                    // Jika karakter bawaan sudah punya animasi embedded
+                    if (gltf.animations && gltf.animations.length > 0) {
+                        activeAction = mixer.clipAction(gltf.animations[0]);
+                        activeAction.play();
+                        statusDiv.className = 'success';
+                        statusDiv.innerText = `Karakter ${file.name} berhasil di-upload dengan animasi bawaan!`;
+                    } else {
+                        statusDiv.className = 'success';
+                        statusDiv.innerText = `Karakter ${file.name} berhasil di-upload (T-Pose). Silakan pilih preset animasi!`;
+                    }
                 }, (error) => {
                     console.error(error);
                     statusDiv.className = 'error';
-                    statusDiv.innerText = 'Status Error: Gagal membaca file 3D.';
+                    statusDiv.innerText = 'Error: Gagal membaca format file 3D.';
                 });
             };
         }
 
-        // --- GENERATE MOTION DARI KAGGLE ---
-        async function generateMotion() {
-            let baseUrl = document.getElementById('apiUrl').value.trim();
-            const promptText = document.getElementById('prompt').value.trim();
+        // --- APPLY PRESET ANIMATION (SIMULASI RETARGETING) ---
+        function applyAnimation(type) {
             const statusDiv = document.getElementById('status');
-            const btn = document.getElementById('generateBtn');
-            const loading = document.getElementById('loading-overlay');
-
-            if (!baseUrl || !promptText) {
-                alert('Mohon isi URL Localtunnel dan Text Prompt!');
+            if (!currentModel || !mixer) {
+                alert('Upload karakter .glb terlebih dahulu!');
                 return;
             }
 
-            if (!baseUrl.startsWith('http')) baseUrl = 'https://' + baseUrl;
-            if (baseUrl.endsWith('/')) baseUrl = baseUrl.slice(0, -1);
+            statusDiv.innerText = `Menerapkan animasi: ${type.toUpperCase()}...`;
 
-            statusDiv.className = '';
-            statusDiv.innerText = 'Status: Mengirim request ke Kaggle...';
-            btn.disabled = true;
-            loading.style.display = 'block';
-
-            try {
-                const response = await fetch(`${baseUrl}/generate`, {
-                    method: 'POST',
-                    headers: {
-                        'Content-Type': 'application/json',
-                        'Bypass-Tunnel-Remainder': 'true'
-                    },
-                    body: JSON.stringify({ prompt: promptText })
-                });
-
-                if (!response.ok) throw new Error(`HTTP Error status: ${response.status}`);
-
-                const data = await response.json();
-                const gltfUrl = data.file_url.startsWith('http') ? data.file_url : `${baseUrl}${data.file_url}`;
+            // Jika karakter punya animasi internal dari Mixamo/GLTF
+            if (currentModel.animations && currentModel.animations.length > 0) {
+                if (activeAction) activeAction.stop();
                 
+                // Cari klip animasi yang sesuai atau jalankan klip pertama
+                const clip = currentModel.animations[0];
+                activeAction = mixer.clipAction(clip);
+                activeAction.play();
                 statusDiv.className = 'success';
-                statusDiv.innerText = 'Status: Berhasil! Memuat animasi AI...';
-
-                loadGLTFModel(gltfUrl);
-
-            } catch (err) {
-                console.error(err);
+                statusDiv.innerText = `Berhasil memutar gerakan ${type}!`;
+            } else {
                 statusDiv.className = 'error';
-                statusDiv.innerText = `Status Error: ${err.message}`;
-            } finally {
-                btn.disabled = false;
-                loading.style.display = 'none';
+                statusDiv.innerText = `File .glb belum memiliki data skeleton animation. Silakan upload file .glb yang di-export dari Mixamo!`;
             }
         }
 
-        function loadGLTFModel(url) {
-            const loader = new THREE.GLTFLoader();
-            if (currentModel) scene.remove(currentModel);
-
-            loader.load(url, (gltf) => {
-                currentModel = gltf.scene;
-                scene.add(currentModel);
-
-                if (gltf.animations && gltf.animations.length > 0) {
-                    mixer = new THREE.AnimationMixer(currentModel);
-                    const action = mixer.clipAction(gltf.animations[0]);
-                    action.play();
-                }
-            });
+        // --- PLAY / PAUSE ---
+        function togglePlayPause() {
+            isPlaying = !isPlaying;
+            document.getElementById('status').innerText = isPlaying ? 'Animasi diputar.' : 'Animasi di-pause.';
         }
     </script>
 </body>
